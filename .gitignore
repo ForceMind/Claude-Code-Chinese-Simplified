@@ -1,0 +1,4 @@
+node_modules/
+cchans-translate-task.md
+.claude/
+*.log

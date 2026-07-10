@@ -1,0 +1,33 @@
+{
+  "name": "cchans",
+  "version": "0.1.0",
+  "description": "Claude Code 汉化工具 —— 等长原地二进制补丁, 零依赖, 永久跟随新版",
+  "bin": {
+    "cchans": "bin/cchans.js"
+  },
+  "files": [
+    "bin",
+    "src",
+    "dict/zh-Hans.json",
+    "dict/oversize.json",
+    "tools"
+  ],
+  "scripts": {
+    "build-dict": "node tools/build-dict.cjs"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "keywords": [
+    "claude-code",
+    "chinese",
+    "i18n",
+    "localization",
+    "汉化"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ForceMind/Claude-Code-Chinese-Simplified.git"
+  },
+  "license": "Apache-2.0"
+}
