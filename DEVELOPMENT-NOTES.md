@@ -53,7 +53,7 @@ CC 是 Bun 编译产物。Bun 二进制的关键结构：
 
 ### 第 2 步：读懂 claude-code-zh-cn 是怎么做的
 
-逆向阅读了它的实现（在 `C:\Users\wxx11\.claude\plugins\claude-code-zh-cn\`）：
+逆向阅读了它的实现（在 `%USERPROFILE%\.claude\plugins\claude-code-zh-cn\`）：
 
 - `bun-binary-io.js`（LIEF 二进制 I/O 核心）——用 **LIEF 库**正式解析 PE/Mach-O，抽取嵌入的 JS 源，改完再**重打包**（`repackPE` / `repackMachO`），Mach-O 还要重新签名。
 - `patch-cli.js`——补丁引擎：抽取 JS 源文本 → `applyTranslations(sourceText, map)` 做文本替换 → 重打包写回。
@@ -187,7 +187,7 @@ Claude-Code-Chinese-Simplified/
 
 ## 七、技术参考与注意事项
 
-- **参考实现**：`C:\Users\wxx11\.claude\plugins\claude-code-zh-cn\`（taekchef，v0.1.84）。核心 `bun-binary-io.js` / `patch-cli.js` / `cli-translations.json`。
+- **参考实现**：`%USERPROFILE%\.claude\plugins\claude-code-zh-cn\`（taekchef，v0.1.84）。核心 `bun-binary-io.js` / `patch-cli.js` / `cli-translations.json`。
 - **CC 二进制位置**（本机）：`C:\nvm4w\nodejs\node_modules\@anthropic-ai\claude-code\bin\claude.exe`（226339362 字节，已汉化）与 `claude.exe.zh-cn-backup`（226344608 字节，纯英文，差 -5246 字节说明 zh-cn 对超长条目做了重打包）。
 - **CC 与 conda 无关**：claude 是按绝对路径安装的全局二进制，定位它即可，无需管 conda `nikki` 环境。
 - **⚠️ 必须实跑补丁产物去验证**（2026-08-03 修正，此前这里写的是"不要实跑，字节断言即可"——那条建议直接导致了 §十一 的严重事故）。字节断言、词边界守卫、对 cli.js 的语法检查**都发现不了**补丁破坏 Bun 运行时数据区的情况。`patch` 现已内置运行时冒烟验证。注意 `--version` 太浅（补丁坏了也能过），必须叠加 `doctor` 这类走完整启动路径的命令。
