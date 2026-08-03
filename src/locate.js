@@ -81,24 +81,64 @@ function commonLocations() {
   return list;
 }
 
-// 返回 { path, version } 或 null。优先级: 显式参数 > CCHANS_TARGET 环境变量 > PATH > 常见全局位置
+const ASIDE_SUFFIX = '.cchans-old';
+
+// 上次热替换若在「已让位、新文件尚未就位」的窗口里被中断, target 会缺失, 而同目录
+// 躺着完好的让位副本。此处在校验二进制之前先自愈 —— 必须放在 locate 里而不是只放在
+// patcher 里: CLI 是先 locate 再进 patcher 的, 放在 patcher 里等于死代码
+// (2026-08-03 审查实证)。纯 fs 操作, 不依赖 patcher, 不引入循环依赖。
+function healMissing(target) {
+  try {
+    if (fs.existsSync(target)) return false;
+    const dir = path.dirname(target);
+    const prefix = path.basename(target) + ASIDE_SUFFIX;
+    const names = fs.readdirSync(dir).filter(n => n.startsWith(prefix));
+    if (!names.length) return false;
+    // 按 mtime 取最新(比依赖文件名里的时间戳字符串排序更稳)
+    const ranked = names.map(n => {
+      const p = path.join(dir, n);
+      let t = 0;
+      try { t = fs.statSync(p).mtimeMs; } catch {}
+      return { p, t };
+    }).sort((a, b) => b.t - a.t);
+    for (const { p } of ranked) {
+      if (!isClaudeBinary(p)) continue;
+      try { fs.renameSync(p, target); return true; } catch {}
+    }
+  } catch {}
+  return false;
+}
+
+// 返回 { path, version, healed } 或 null。
+// 显式路径(参数 / CCHANS_TARGET)是**权威**的: 校验不过直接失败, 绝不悄悄改打别的
+// 安装位置 —— 否则用户敲错路径就会误伤另一个 claude.exe(2026-08-03 审查实证)。
+// 只有在完全没有显式指定时, 才按 PATH > 常见全局位置自动探测。
 function locate(explicit) {
+  const pinned = explicit || process.env.CCHANS_TARGET || null;
+  if (pinned) {
+    const healed = healMissing(pinned);
+    if (!isClaudeBinary(pinned)) return null;
+    let real = pinned;
+    try { real = fs.realpathSync(pinned); } catch {}
+    return { path: real, version: readVersion(real), healed };
+  }
+
   const tried = [];
-  if (explicit) tried.push(explicit);
-  if (process.env.CCHANS_TARGET) tried.push(process.env.CCHANS_TARGET);
   for (const shim of whichClaude()) tried.push(...candidatesFromShim(shim));
   tried.push(...commonLocations());
 
+  let healed = false;
   for (const p of tried) {
+    if (healMissing(p)) healed = true;
     if (isClaudeBinary(p)) {
       // 原生安装的 claude 常是符号链接(指向 versions/<版本>/ 下的真身),
       // 解析成真实路径再补丁, 避免 rename 只替换了链接本身
       let real = p;
       try { real = fs.realpathSync(p); } catch {}
-      return { path: real, version: readVersion(real) };
+      return { path: real, version: readVersion(real), healed };
     }
   }
   return null;
 }
 
-module.exports = { locate, isClaudeBinary, readVersion, BUN_TRAILER, BIN_NAME };
+module.exports = { locate, isClaudeBinary, readVersion, healMissing, BUN_TRAILER, BIN_NAME, ASIDE_SUFFIX };

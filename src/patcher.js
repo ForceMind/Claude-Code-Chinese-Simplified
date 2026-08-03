@@ -13,7 +13,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const { execFileSync, spawnSync } = require('child_process');
-const { isClaudeBinary, readVersion } = require('./locate');
+const { isClaudeBinary, readVersion, healMissing, ASIDE_SUFFIX } = require('./locate');
 
 const ROOT = path.resolve(__dirname, '..');
 const DICT_PATH = path.join(ROOT, 'dict', 'zh-Hans.json');
@@ -81,7 +81,7 @@ function resolveSource(target) {
     throw new Error('备份文件 ' + backupPath + ' 本身已被汉化, 不能作源。请重装/升级 Claude Code 后重试。');
   }
   const zhcnPath = target + ZHCN_BACKUP_SUFFIX;
-  if (fs.existsSync(zhcnPath)) {
+  if (fs.existsSync(zhcnPath) && isClaudeBinary(zhcnPath)) { // 同样要校验完整性, 截断的备份不能当源
     const b = fs.readFileSync(zhcnPath);
     if (!looksTranslated(b)) {
       fs.writeFileSync(backupPath, b); // 收编为本工具的备份
@@ -123,21 +123,67 @@ const isIdByte = b =>
 // 界面文案零假阳性, 全词典共标出 37 处 / 9 条词条(均为 Bun/SQLite/JSC 内部串)。
 // 注意它只覆盖「字符串表」这一类; 嵌在连续文本模板里的协议常量(如 WebSocket
 // 握手头的 "Sec-WebSocket-Version: 13")周围没有 NUL, 抓不到, 那类走词典黑名单。
+// 判据一「C 串表」: 命中所在的 NUL 分隔单元本身是可打印 ASCII, 且左右紧邻的单元
+// 也都由**单个** NUL 分隔、同为可打印 ASCII —— 这正是 C/C++ 字面量池的形状。
+const isPrintByte = b => (b >= 0x20 && b <= 0x7e) || b === 0x09;
+const MAX_UNIT = 400;
+
+function neighborIsCString(buf, sep, dir) {
+  if (dir < 0) {
+    if (sep <= 0 || buf[sep - 1] === 0) return false; // 不是单 NUL 分隔
+    let s = sep - 1, n = 0;
+    while (s > 0 && buf[s - 1] !== 0 && n < MAX_UNIT) { s--; n++; }
+    if (s === 0 || s >= sep) return false;
+    for (let i = s; i < sep; i++) if (!isPrintByte(buf[i])) return false;
+    return true;
+  }
+  if (sep + 1 >= buf.length || buf[sep + 1] === 0) return false;
+  let e = sep + 1, n = 0;
+  while (e < buf.length && buf[e] !== 0 && n < MAX_UNIT) { e++; n++; }
+  if (e >= buf.length || e <= sep + 1) return false;
+  for (let i = sep + 1; i < e; i++) if (!isPrintByte(buf[i])) return false;
+  return true;
+}
+
+function inCStringTable(buf, idx, len) {
+  let s = idx, n = 0;
+  while (s > 0 && buf[s - 1] !== 0 && n < MAX_UNIT) { s--; n++; }
+  if (s === 0 || buf[s - 1] !== 0) return false;
+  let e = idx + len; n = 0;
+  while (e < buf.length && buf[e] !== 0 && n < MAX_UNIT) { e++; n++; }
+  if (e >= buf.length || buf[e] !== 0) return false;
+  for (let i = s; i < e; i++) if (!isPrintByte(buf[i])) return false;
+  return neighborIsCString(buf, s - 1, -1) && neighborIsCString(buf, e, +1);
+}
+
+// 判据二「孤立 NUL 密集」: 邻域内单个 NUL 频繁出现且无长 NUL 串。覆盖判据一漏掉
+// 的形状(单元里混了不可打印字节、或分隔符不止一个 NUL), 如 Bun REPL 帮助文本、
+// JSC 堆转储模板、SQLite/PCRE2 消息表。
+// 边界处理: 孤立 NUL 只统计「左右邻居都在窗口内」的, NUL 串长度按缓冲区真实长度
+// 计(不被窗口截断)—— 否则会在窗口两端产生漏判/误判(2026-08-03 审查实证)。
 const POOL_WIN = 40, POOL_MIN_ISOLATED = 3, POOL_MAX_RUN = 4;
 
-function inNativePool(buf, idx, len) {
+function hasDenseIsolatedNuls(buf, idx, len) {
   const s = Math.max(0, idx - POOL_WIN);
   const e = Math.min(buf.length, idx + len + POOL_WIN);
-  let isolated = 0, run = 0, maxRun = 0;
+  let isolated = 0;
   for (let i = s; i < e; i++) {
-    if (buf[i] === 0) { run++; continue; }
-    if (run > maxRun) maxRun = run;
-    if (run === 1) isolated++;
-    run = 0;
+    if (buf[i] !== 0) continue;
+    // 按真实缓冲区量测这一串 NUL 的长度, 不受窗口边界截断
+    let a = i; while (a > 0 && buf[a - 1] === 0) a--;
+    let b = i; while (b + 1 < buf.length && buf[b + 1] === 0) b++;
+    const runLen = b - a + 1;
+    if (runLen >= POOL_MAX_RUN) return false;
+    if (runLen === 1 && i > s && i < e - 1) isolated++;
+    i = b; // 跳过整串
   }
-  if (run > maxRun) maxRun = run;
-  if (maxRun >= POOL_MAX_RUN) return false;
   return isolated >= POOL_MIN_ISOLATED;
+}
+
+// 两个判据各有盲区(实测: 判据一独有 16 处、判据二独有 8 处, 全部经人工核对确为
+// Bun/SQLite/JSC/PCRE2 内部串), 故取并集。
+function inNativePool(buf, idx, len) {
+  return inCStringTable(buf, idx, len) || hasDenseIsolatedNuls(buf, idx, len);
 }
 
 function patchBuffer(buf, dict, onProgress) {
@@ -147,7 +193,8 @@ function patchBuffer(buf, dict, onProgress) {
     const en = keys[k];
     const enBuf = Buffer.from(en, 'utf8');
     const zhBuf = Buffer.from(dict[en], 'utf8');
-    if (zhBuf.length > enBuf.length) continue; // 词典保证不会, 双保险
+    if (zhBuf.length > enBuf.length) continue;
+    if (zhBuf.includes(0)) continue; // 双保险: 译文含 NUL 会破坏原生池守卫依赖的不变式 // 词典保证不会, 双保险
     const guardPrev = isIdByte(enBuf[0]);
     const guardNext = isIdByte(enBuf[enBuf.length - 1]);
     let from = 0, hits = 0, idx;
@@ -196,7 +243,17 @@ function inheritExecMode(tmp, target) {
   if (process.platform === 'win32') return;
   let mode = 0o755;
   try { mode = fs.statSync(target).mode & 0o777; } catch {}
-  try { fs.chmodSync(tmp, mode | 0o111); } catch {}
+  // 只给"本来就有读权限"的身份补执行位, 不放宽可见范围:
+  // 0700 -> 0700, 0644 -> 0755, 0755 -> 0755。
+  // 直接 `mode | 0o111` 会把管理员刻意收紧的 0700 变成 0711, 让同机其他账号也能
+  // 执行(Linux 上 --x 即可 execve), 违反管理员意图且 restore 修不回来。
+  const wanted = mode | 0o100 | ((mode & 0o044) >> 2);
+  try {
+    fs.chmodSync(tmp, wanted);
+  } catch (e) {
+    throw new Error('无法给补丁产物设置执行权限(' + e.code + '): ' + tmp +
+      '\n  没有执行位的产物无法运行。请检查目录权限, 或改用有写权限的安装位置。');
+  }
 }
 
 // 尽力删除临时文件: 刚写出的 253MB exe 常被杀毒软件即时扫描而短暂锁住,
@@ -211,8 +268,6 @@ function removeQuietly(p, attempts = 5) {
   }
   return false;
 }
-
-const ASIDE_SUFFIX = '.cchans-old';
 
 // 提交补丁产物, 两级策略:
 //
@@ -283,23 +338,9 @@ function cleanAside(target) {
   }
 }
 
-// 上次热替换若在「已让位、新文件尚未就位」的微秒级窗口里被强杀/断电, target 会
-// 缺失。此时磁盘上躺着完好的让位副本, 却因为 isClaudeBinary 先行拦截而报
-// "不是有效的 Claude Code 二进制", 用户只能重装 —— 故开机先自愈。
-function healInterrupted(target) {
-  if (fs.existsSync(target)) return false;
-  const dir = path.dirname(target);
-  const prefix = path.basename(target) + ASIDE_SUFFIX;
-  let names = [];
-  try { names = fs.readdirSync(dir); } catch { return false; }
-  const candidates = names.filter(n => n.startsWith(prefix)).sort(); // 时间戳升序, 取最新
-  for (const n of candidates.reverse()) {
-    const p = path.join(dir, n);
-    if (!isClaudeBinary(p)) continue;
-    try { fs.renameSync(p, target); return true; } catch {}
-  }
-  return false;
-}
+// 自愈实现放在 locate.js(见那里的注释: CLI 先 locate 再进 patcher, 放这里是死代码),
+// 此处仅复用, 保证两条入口行为一致。
+const healInterrupted = healMissing;
 
 function atomicWrite(target, buf) {
   const tmp = target + '.cchans-tmp';
@@ -388,9 +429,12 @@ function patch(target, opts = {}) {
     throw new Error('不是有效的 Claude Code 二进制(缺少 Bun 魔术串或体积过小): ' + target);
   }
   const dict = loadDict();
-  cleanAside(target);                       // 回收陈旧的让位副本
   removeQuietly(target + '.cchans-tmp', 1); // 回收上次写盘失败留下的半成品
+  // 注意顺序: cleanAside 必须在 resolveSource **之后**。让位副本可能是用户手上
+  // 最后一份纯英文原版(例如备份被误删), 先删再发现没有可用源就无法挽回了
+  // (2026-08-03 审查实证)。
   const { source, refreshed } = resolveSource(target);
+  cleanAside(target); // 已确认拿到可用的纯英文源, 此时回收陈旧让位副本才安全
   const buf = Buffer.from(source); // 副本, 不动源
   const t0 = Date.now();
   const stats = patchBuffer(buf, dict, opts.onProgress);

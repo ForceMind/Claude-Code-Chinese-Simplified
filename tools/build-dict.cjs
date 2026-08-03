@@ -49,6 +49,9 @@ const DANGEROUS = new Set(['Version: ']);
 // zh 引入了 en 没有的字面量危险字符 → 可能破坏 JS 字符串语法
 const zhUnsafe = (en, zh) => {
   if (/[\r\n]/.test(zh)) return true;
+  // 控制字符(尤其 NUL)绝不能进词典: 补丁引擎的原生常量池守卫依赖「替换过程不改变
+  // NUL 结构」这一不变式, 译文里带 NUL 会让后续命中的判定漂移。
+  if (/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/.test(zh)) return true;
   for (const ch of ['"', "'", '`', '\\']) {
     if (zh.includes(ch) && !en.includes(ch)) return true;
   }
