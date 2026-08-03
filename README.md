@@ -4,9 +4,19 @@
 
 **零依赖 · 一条命令 · 跟随新版 · 随时还原**
 
+```bash
+git clone https://github.com/ForceMind/Claude-Code-Chinese-Simplified
+cd Claude-Code-Chinese-Simplified
+node bin/cchans.js patch
 ```
-npx cchans patch
-```
+
+clone 下来直接跑，**不需要 `npm install`**（工具本身零依赖，只要 Node.js ≥ 18）。
+`patch` 会自动定位你的 `claude.exe`、备份、打补丁，并**实际运行产物验证能否启动**，
+跑通了才替换——验证不过就中止，你的 `claude.exe` 一个字节都不会变。
+
+打完补丁**需要重启 Claude Code 才生效**（已运行的进程仍用内存里的旧映像）。
+
+> 本工具尚未发布到 npm，`npx cchans` 暂不可用。
 
 ## 为什么造这个轮子
 
@@ -28,16 +38,25 @@ Claude Code 已从 `cli.js` 脚本改为 Bun 编译的原生单文件二进制�
 
 ## 使用
 
+在仓库目录下执行（下面用 `cchans` 代指 `node bin/cchans.js`）：
+
 ```bash
-cchans patch [路径]     # 打补丁(自动定位二进制、自动备份、可重复执行)
-cchans restore [路径]   # 还原纯英文
-cchans status [路径]    # 查看状态(版本/是否已汉化/备份情况)
-cchans scan [路径]      # 覆盖扫描 + 词典滞后诊断(--json 完整输出 / --prompt 生成翻译任务提示词)
-cchans locate           # 只定位 Claude Code 二进制
+node bin/cchans.js patch [路径]     # 打补丁(自动定位、自动备份、实跑验证、可重复执行)
+node bin/cchans.js restore [路径]   # 还原纯英文
+node bin/cchans.js status [路径]    # 查看状态(版本/是否已汉化/备份情况)
+node bin/cchans.js scan [路径]      # 覆盖扫描 + 词典滞后诊断(--json 完整输出 / --prompt 生成翻译任务提示词)
+node bin/cchans.js locate           # 只定位 Claude Code 二进制
 ```
 
+嫌路径长可以 `npm link` 一次，之后就能直接用 `cchans patch`。
+
 路径通常可省略（自动从 PATH 和常见安装位置定位），也可用环境变量 `CCHANS_TARGET` 指定。
-打补丁前请关闭正在运行的 Claude Code。全量扫描约 1 分钟。
+全量扫描约 1 分钟，加上实跑验证共约 1.5 分钟。
+
+**不必关闭 Claude Code**：目标被占用时会自动走热替换（先给旧文件改名让位再放新文件，
+失败自动回滚）。但已经在运行的会话仍用旧映像，**重启后才会变中文**。
+
+出任何问题都可以 `node bin/cchans.js restore` 一键还原成纯英文原版（备份是打补丁时自动做的）。
 
 ## 平台支持
 
