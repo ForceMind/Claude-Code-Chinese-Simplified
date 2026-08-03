@@ -2,7 +2,7 @@
 'use strict';
 // cchans —— Claude Code 汉化工具 CLI(零依赖)
 //
-//   cchans patch [目标路径]     打补丁(自动定位/备份/幂等)
+//   cchans patch [目标路径]     打补丁(自动定位/备份/幂等; --no-verify 跳过实跑验证)
 //   cchans restore [目标路径]   还原纯英文
 //   cchans status [目标路径]    查看当前状态
 //   cchans scan [目标路径]      覆盖扫描 + 词典滞后诊断(--json 原始结果 / --prompt 生成翻译任务提示词)
@@ -44,10 +44,16 @@ try {
     case 'patch': {
       const { path: target } = requireTarget();
       console.log('打补丁中(全量扫描约 1 分钟, 请稍候)…');
-      const r = patcher.patch(target, { onProgress: progress('词条') });
+      const r = patcher.patch(target, {
+        onProgress: progress('词条'),
+        verify: !flags.has('--no-verify'),
+        onVerify: () => { endProgress(); console.log('验证中(实跑补丁产物, 约 10s)…'); },
+      });
       endProgress();
       console.log('✓ 完成: ' + r.keysHit + '/' + r.dictTotal + ' 词条命中, 共替换 ' + r.occurrences +
         ' 处(词边界守卫跳过 ' + r.boundarySkips + ' 处代码内命中), 耗时 ' + r.seconds.toFixed(1) + 's');
+      console.log(r.verified ? '  运行验证: 通过(--version + doctor 实跑)'
+                             : '  运行验证: 已跳过(--no-verify) —— 不保证产物能启动');
       if (r.backupRefreshed) console.log('  已刷新纯英文备份(跟随当前版本)。');
       if (r.resigned === false) {
         console.log('⚠ macOS 重签名失败: 请手动执行 codesign --force --sign - "' + target + '"');
@@ -104,7 +110,7 @@ try {
         'cchans —— Claude Code 汉化工具(等长原地补丁, 零依赖, 跟随新版)',
         '',
         '用法:',
-        '  cchans patch [路径]     打补丁(自动定位/备份/可重复执行)',
+        '  cchans patch [路径]     打补丁(自动定位/备份/可重复执行/实跑验证)',
         '  cchans restore [路径]   还原纯英文',
         '  cchans status [路径]    查看状态',
         '  cchans scan [路径]      覆盖扫描 + 词典滞后诊断(--json 完整输出 / --prompt 生成翻译任务提示词)',

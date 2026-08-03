@@ -33,6 +33,14 @@ const asciiPrintable = s => /^[\x20-\x7e]+$/.test(s);
 // 替换后仍会与被填充的字符串键 "沙盒 " 不一致 → 语义损坏。整词剔除。
 const bareIdentWord = en => /^[A-Za-z][A-Za-z0-9_$]*$/.test(en);
 
+// 危险词条黑名单(实证会破坏二进制, 详见 DEVELOPMENT-NOTES §十一):
+// 补丁扫的是整个二进制, 不只是 Claude Code 自己的 JS —— 还会扫到 Bun 运行时的
+// 原生标识符表。" to cancel" 的 40 处命中里有 1 处落在该表的
+// "could not find stream to cancel" 上(紧邻 preventCancel / oncancel 等流属性名),
+// 覆写后原生流对象拿不到 cancel 方法, claude 启动即
+// TypeError: ptr.cancel is not a function。整词剔除(损失 39 处正常界面文案)。
+const DANGEROUS = new Set([' to cancel']);
+
 // zh 引入了 en 没有的字面量危险字符 → 可能破坏 JS 字符串语法
 const zhUnsafe = (en, zh) => {
   if (/[\r\n]/.test(zh)) return true;
@@ -52,7 +60,7 @@ if (!fs.existsSync(SRC)) {
 const src = JSON.parse(fs.readFileSync(SRC, 'utf8'));
 const safe = {};
 const oversize = {};
-let total = 0, kept = 0, over = 0, skipped = 0, placeholder = 0, unsafe = 0, tooShort = 0, bareWord = 0;
+let total = 0, kept = 0, over = 0, skipped = 0, placeholder = 0, unsafe = 0, tooShort = 0, bareWord = 0, dangerous = 0;
 
 for (const item of src) {
   total++;
@@ -63,6 +71,7 @@ for (const item of src) {
   if (en.includes('${')) { placeholder++; continue; }  // 抽取态占位符, 永远打不中且版本锁死
   if (zhUnsafe(en, zh)) { unsafe++; continue; }        // zh 会破坏字符串字面量语法
   if (bareIdentWord(en)) { bareWord++; continue; }     // 裸标识符词, 语义损坏风险
+  if (DANGEROUS.has(en)) { dangerous++; continue; }    // 实证会破坏二进制
   if (byteLen(en) < 6) { tooShort++; continue; }       // 过短的 en 误伤风险高(B4)
   if (byteLen(zh) > byteLen(en)) { oversize[en] = zh; over++; continue; }
   safe[en] = zh;
@@ -87,6 +96,7 @@ const report = {
   占位符剔除: placeholder,
   语法不安全剔除: unsafe,
   裸标识符词剔除: bareWord,
+  危险词条剔除: dangerous,
   过短剔除: tooShort,
   无效跳过: skipped,
   覆盖率: (kept / (kept + over) * 100).toFixed(1) + '%',

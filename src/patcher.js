@@ -10,8 +10,9 @@
 // target 是纯英文(新装或刚升级) → 刷新备份; 已汉化 → 用现有备份作源。
 
 const fs = require('fs');
+const os = require('os');
 const path = require('path');
-const { execFileSync } = require('child_process');
+const { execFileSync, spawnSync } = require('child_process');
 const { isClaudeBinary, readVersion } = require('./locate');
 
 const ROOT = path.resolve(__dirname, '..');
@@ -130,9 +131,7 @@ function patchBuffer(buf, dict, onProgress) {
 // 同目录写临时文件再 rename(同盘保证原子性); rename 覆盖会让 target 指向新
 // inode, 与 install 时的硬链接副本自然隔离。Windows 上目标被运行中的进程占用
 // 时 rename 抛 EBUSY/EPERM, 转成友好提示。
-function atomicWrite(target, buf) {
-  const tmp = target + '.cchans-tmp';
-  fs.writeFileSync(tmp, buf);
+function commitTmp(tmp, target) {
   try {
     fs.renameSync(tmp, target);
   } catch (e) {
@@ -141,6 +140,50 @@ function atomicWrite(target, buf) {
       throw new Error('目标文件被占用: 请先关闭所有正在运行的 Claude Code, 再重新执行。');
     }
     throw e;
+  }
+}
+
+function atomicWrite(target, buf) {
+  const tmp = target + '.cchans-tmp';
+  fs.writeFileSync(tmp, buf);
+  commitTmp(tmp, target);
+}
+
+// 运行时冒烟验证 —— 本工具最重要的安全网(2026-08-03 血的教训, 详见 §十一)。
+//
+// 补丁扫的是整个二进制, 除 Claude Code 自己的 JS 外, 还会扫到 Bun 运行时的原生
+// 标识符表和第三方库(SQLite/ripgrep/ICU…)的数据区。实证: " to cancel" 的一处命中
+// 落在 Bun 原生标识符表, 覆写后启动即 TypeError: ptr.cancel is not a function ——
+// 而长度断言、词边界守卫、对 cli.js 的 JS 语法检查全都发现不了这类破坏。
+//
+// 结论: 只有「产物真跑通」才算补丁成功。跑通前绝不覆盖用户的 claude.exe。
+// 用独立的 CLAUDE_CONFIG_DIR, 避免验证过程污染用户的真实会话/daemon 状态。
+const CRASH_RE = /is not a function|Bun v\d|panic:|Segmentation fault|Illegal instruction/i;
+const SMOKE_ARGS = [['--version'], ['doctor']]; // --version 太浅(补丁坏了也能过), 必须叠加 doctor
+
+function verifyRuntime(exePath) {
+  let cfg;
+  try {
+    cfg = fs.mkdtempSync(path.join(os.tmpdir(), 'cchans-verify-'));
+  } catch (e) {
+    return { ok: false, reason: '无法创建临时配置目录: ' + e.message };
+  }
+  try {
+    for (const args of SMOKE_ARGS) {
+      const label = args.join(' ');
+      const r = spawnSync(exePath, args, {
+        env: { ...process.env, CLAUDE_CONFIG_DIR: cfg },
+        encoding: 'utf8', timeout: 120000, windowsHide: true,
+      });
+      if (r.error) return { ok: false, reason: label + ' 无法运行: ' + r.error.message };
+      const out = ((r.stdout || '') + (r.stderr || '')).trim();
+      const firstLine = out.split('\n')[0] || '(无输出)';
+      if (CRASH_RE.test(out)) return { ok: false, reason: label + ' 输出含崩溃特征: ' + firstLine };
+      if (r.status !== 0) return { ok: false, reason: label + ' 退出码 ' + r.status + ': ' + firstLine };
+    }
+    return { ok: true };
+  } finally {
+    try { fs.rmSync(cfg, { recursive: true, force: true }); } catch {}
   }
 }
 
@@ -172,7 +215,32 @@ function patch(target, opts = {}) {
   if (stats.keysHit === 0) {
     throw new Error('没有任何词条命中 —— 词典可能与该版本完全不匹配, 已中止写入。请运行 scan 诊断。');
   }
-  atomicWrite(target, buf);
+  // 先落临时文件 → (macOS 重签名) → 实跑验证 → 通过才 rename 覆盖 target。
+  // 验证不通过时 target 保持原样, 用户环境不受任何影响。
+  const tmp = target + '.cchans-tmp';
+  fs.writeFileSync(tmp, buf);
+  let resigned = null;
+  let verified = null;
+  try {
+    resigned = resignIfDarwin(tmp);
+    if (opts.verify !== false) {
+      if (opts.onVerify) opts.onVerify();
+      const v = verifyRuntime(tmp);
+      verified = v.ok;
+      if (!v.ok) {
+        throw new Error(
+          '补丁产物运行验证失败: ' + v.reason + '\n' +
+          '  已中止写入, 你的 claude.exe 未被改动(仍是打补丁前的状态)。\n' +
+          '  这说明词典里有条目破坏了二进制(通常是命中了 Bun 运行时/第三方库的数据区)。\n' +
+          '  请到 GitHub 提 issue: ForceMind/Claude-Code-Chinese-Simplified'
+        );
+      }
+    }
+  } catch (e) {
+    try { fs.unlinkSync(tmp); } catch {}
+    throw e;
+  }
+  commitTmp(tmp, target);
   return {
     keysHit: stats.keysHit,
     occurrences: stats.occurrences,
@@ -181,7 +249,8 @@ function patch(target, opts = {}) {
     backupRefreshed: refreshed,
     seconds: (Date.now() - t0) / 1000,
     version: readVersion(target),
-    resigned: resignIfDarwin(target), // null=非 macOS, true=已重签名, false=重签名失败
+    resigned, // null=非 macOS, true=已重签名, false=重签名失败
+    verified, // true=实跑验证通过, null=跳过验证
   };
 }
 
@@ -214,5 +283,5 @@ function status(target) {
 module.exports = {
   loadDict, looksTranslated, countCjkRuns, resolveSource,
   patchBuffer, atomicWrite, patch, restore, status, resignIfDarwin,
-  BACKUP_SUFFIX, DICT_PATH,
+  verifyRuntime, BACKUP_SUFFIX, DICT_PATH,
 };

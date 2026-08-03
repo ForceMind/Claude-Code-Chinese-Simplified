@@ -147,7 +147,7 @@ Claude-Code-Chinese-Simplified/
 ├── dict/
 │   ├── sources/
 │   │   └── cli-translations.json   # ✅ 上游词典(claude-code-zh-cn 起步 + 自行增补), 1903 条
-│   ├── zh-Hans.json                # ✅ 等长安全词典, 1165 条 (96755 字节)
+│   ├── zh-Hans.json                # ✅ 等长安全词典, 1164 条 (96732 字节)
 │   └── oversize.json               # ✅ 超长条目, 477 条 (备用)
 └── src/
     ├── locate.js                   # ✅ 定位 claude 二进制
@@ -190,7 +190,7 @@ Claude-Code-Chinese-Simplified/
 - **参考实现**：`C:\Users\wxx11\.claude\plugins\claude-code-zh-cn\`（taekchef，v0.1.84）。核心 `bun-binary-io.js` / `patch-cli.js` / `cli-translations.json`。
 - **CC 二进制位置**（本机）：`C:\nvm4w\nodejs\node_modules\@anthropic-ai\claude-code\bin\claude.exe`（226339362 字节，已汉化）与 `claude.exe.zh-cn-backup`（226344608 字节，纯英文，差 -5246 字节说明 zh-cn 对超长条目做了重打包）。
 - **CC 与 conda 无关**：claude 是按绝对路径安装的全局二进制，定位它即可，无需管 conda `nikki` 环境。
-- **⚠️ 不要实跑 226MB 的 claude.exe 去验证**（`--version`/`--help` 会超时挂起，可能因需要特定 env）。用字节级断言验证补丁即可。
+- **⚠️ 必须实跑补丁产物去验证**（2026-08-03 修正，此前这里写的是"不要实跑，字节断言即可"——那条建议直接导致了 §十一 的严重事故）。字节断言、词边界守卫、对 cli.js 的语法检查**都发现不了**补丁破坏 Bun 运行时数据区的情况。`patch` 现已内置运行时冒烟验证。注意 `--version` 太浅（补丁坏了也能过），必须叠加 `doctor` 这类走完整启动路径的命令。
 - **⚠️ 文件持久化坑**：node/PowerShell 产生文件的命令需带 `dangerouslyDisableSandbox`，并用 `wc -c` 复核字节数确认落盘（`build-dict.cjs` 曾出现报告成功但未持久化，`zh-Hans.json` 正确应为 97271 字节）。
 - **Bun 识别**：文件尾部含 `\n---- Bun! ----\n` 且体积 >20MB 即判定为 claude 原生二进制。
 
@@ -277,3 +277,78 @@ scan 的短词告警引出关键发现：`Sandbox` 434 处命中里 **301 处在
 合并 → `build-dict` → 重新 `patch` → `scan` 复核：新增的 13 条全部命中（957 = 944 + 13），词典总量 1151→1165，覆盖率 70.4%→71.0%。剩下的未命中项**刻意保留在源词典里不删**——它们对更早版本的用户仍然有效，删掉只会丢失向后兼容性，删除的正确前提是"确认收录了 CC 早期版本已经很老、不会再有人用"而不是"这个版本用不上"。
 
 **方法论小结**：滞后诊断不能只看"未命中"的字面文本重新翻译一遍——要先确认未命中的原因是"缺新词条"还是"旧词条描述的文案已不存在"，两者的修复动作完全不同。后者需要去当前二进制里找真正存在的现存文案，而不是重复劳动。
+
+---
+
+## 十一、2026-08-03 严重事故：补丁打出来的 claude.exe 启动即崩溃
+
+### 现象
+
+用户打完补丁后启动 `claude`，直接崩：
+
+```
+TypeError: ptr.cancel is not a function. (In 'ptr.cancel(error)', 'ptr.cancel' is undefined)
+      at destroy (internal:streams/native-readable:100:15)
+      at _destroy (internal:streams/destroy:63:18)
+      at endReadableNT (internal:streams/readable:906:52)
+Bun v1.4.0 (Windows x64 baseline)
+```
+
+### 排查中的一次错误判断（值得记下来）
+
+第一反应是看 `~/.claude/daemon.log`，发现最后一条是
+`upgrade self-respawn spawned but never became reachable within 45s`，
+于是判定"是我连续 restore/patch 触发 daemon 反复自重启导致的竞态"，并让用户去开新终端验证。**这个因果是反的**：daemon 拿新二进制 respawn 起不来，正是"新二进制本身是坏的"的**结果**而非原因。日志时间线其实已经把答案写在脸上了：
+
+- `02:20:05` 文件变化（restore → 纯英文）→ 重启**成功** `daemon start version=2.1.220`
+- `02:22:09` 文件变化（patch → 汉化版）→ 重启**失败**（45s 内不可达）
+
+纯英文能起、汉化版起不来——证据一直都在，只是被"我倾向于相信补丁没问题"的先入之见盖住了。
+
+### 定位：隔离复现 + 自动二分
+
+正确做法是**不碰用户环境**，在 scratchpad 里复制一份纯英文基线、打上补丁、用独立 `CLAUDE_CONFIG_DIR` 实际运行：
+
+- `--version` → **正常**（这就是此前"验证通过"全是假阳性的原因：路径太浅）
+- `doctor` → **崩溃**，与用户报错一字不差 → 确认是补丁的锅
+
+然后写自动 delta debugging（`ddmin`）脚本二分词典。关键工程技巧：**先一次性预计算全部 4683 处替换位置**（复刻 patcher 的顺序与词边界守卫），之后每轮只需按子集把记录应用到干净副本 + 写盘 + 实跑，把每轮成本从 70s 降到几秒。17 次测试收敛到唯一元凶：
+
+```
+" to cancel"  ->  " 取消"   (命中 40 处)
+```
+
+### 根因：补丁扫的是整个二进制，不只是 Claude Code 的 JS
+
+打印这 40 处命中的上下文，第 2 处性质完全不同：
+
+```
+@80565856
+…toUTF16AllocSentinel·JSSentinel·…·oncancel·could not find stream to cancel·
+preventCancel·boundResumableSinkCancel·boundAsyncIterableSourceCancel·flowlabel…
+```
+
+这是 **Bun 运行时的原生标识符表**，紧邻的全是流对象的属性名。把 `could not find stream to cancel` 里的 " to cancel" 覆写成中文+空格填充，破坏了这张表 → 原生流对象拿不到 `cancel` 方法 → `ptr.cancel is not a function`。其余 39 处（`Press Esc to cancel` 等）都是 Claude Code 自己的界面文案，无害。
+
+精确验证（只排除这一处，其余 4682 处照打）：
+
+```
+[全量(对照)]     应用 4683 处 => 崩溃 ✗
+[排除 @80565856] 应用 4682 处 => 正常 ✓
+```
+
+**这不是"一条词条没翻好"，是架构缺陷**：等长替换是对整个 253MB 做字节搜索替换，扫过的还有 Bun 运行时、SQLite / ripgrep / ICU / libjpeg 等第三方库的数据区。词边界守卫只挡标识符内部命中，挡不住这种"字符串字面量落在原生数据表里"。
+
+### 修复
+
+1. **运行时冒烟验证（最重要，`src/patcher.js: verifyRuntime`）**——补丁产物先落临时文件，用独立 `CLAUDE_CONFIG_DIR` 实跑 `--version` + `doctor`，**跑通才 rename 覆盖 target**；不通过就删临时文件并报错，用户的 claude.exe 一个字节都不会被改。这道网把整类"改坏二进制"问题从"用户下次启动才发现"变成"打补丁当场拦截"。已双向验证：好产物放行、故意注入那一处的坏产物被准确拦截并报出崩溃原因。
+2. **危险词条黑名单（`tools/build-dict.cjs: DANGEROUS`）**——剔除 `" to cancel"`，代价是损失 39 处正常界面文案，覆盖率 71.0% → 70.9%。
+3. `patch` 增加 `--no-verify` 逃生口（默认开启验证）。
+
+### 教训
+
+1. **「验证过才算完成」里的"验证"必须触达真实失败模式。** 字节断言 + esbuild 语法检查 + `--version` 全绿，但它们联合起来仍然漏掉了这个 bug——因为没有一项真正走完启动路径。绿灯的数量不等于覆盖度。
+2. **自己写在文档里的建议也会是错的。** §七 那条"不要实跑 claude.exe，字节断言即可"是上一轮开发为了绕开超时问题留下的，结果直接埋了这颗雷。已改正。
+3. **工具自己发出的告警不要跳过。** `scan` 两次都打印了"短词命中异常多，建议人工核查"，`" to cancel"` 就在名单里，两次都被无视了。
+4. **因果方向要用证据钉死。** daemon 日志差点让人把结果当原因；先问"如果我的假设成立，日志还应该长什么样"，再回去核对。
+5. **修 bug 前先把复现做成隔离的、可自动判定的。** 有了"复制副本 + 独立配置目录 + 实跑判崩"这个 harness，二分才敢全自动跑，也才敢在不打扰用户环境的前提下反复试。
