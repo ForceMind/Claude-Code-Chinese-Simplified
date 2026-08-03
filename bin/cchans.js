@@ -10,7 +10,7 @@
 //
 // 目标路径可省略(自动定位), 也可用环境变量 CCHANS_TARGET 指定。
 
-const { locate } = require('../src/locate');
+const { locate, healable } = require('../src/locate');
 const patcher = require('../src/patcher');
 const scanner = require('../src/scan');
 
@@ -24,33 +24,37 @@ function fail(msg) {
   process.exit(1);
 }
 
+// 只有会改写目标的命令才允许自愈(rename 让位副本); status/scan/locate 保持只读
+const MUTATING = new Set(['patch', 'restore']);
+
 function requireTarget() {
   const pinned = explicit || process.env.CCHANS_TARGET;
-  const found = locate(explicit);
+  const found = locate(explicit, { heal: MUTATING.has(cmd) });
   if (!found) {
     let extra = '';
     if (pinned) {
       extra = '\n  注意: 你显式指定了 ' + pinned + '\n' +
               '  该路径不是有效的 Claude Code 二进制。为避免误伤别的安装位置, 本工具\n' +
               '  不会自动改打其他路径 —— 请核对路径后重试。';
-      // 中断残留的线索: 同目录若有让位副本, 直接告诉用户怎么恢复
-      try {
-        const dir = require('path').dirname(pinned);
-        const prefix = require('path').basename(pinned) + '.cchans-old';
-        const left = require('fs').readdirSync(dir).filter(n => n === prefix || n.startsWith(prefix + '.'));
-        if (left.length) {
-          extra += '\n  发现同目录存在让位副本(上次替换可能被中断):\n' +
-                   left.map(n => '    ' + n).join('\n') +
-                   '\n  可手动恢复: ' + (process.platform === 'win32' ? 'move /y' : 'mv -f') +
-                   ' "' + left[left.length - 1] + '" "' + require('path').basename(pinned) + '"';
-        }
-      } catch {}
+      const cands = healable(pinned); // 与 healMissing 同一套筛选(精确前缀 + 有效二进制)
+      if (cands) {
+        const newest = cands.map(p => {
+          let t = 0; try { t = require('fs').statSync(p).mtimeMs; } catch {}
+          return { p, t };
+        }).sort((a, b) => b.t - a.t)[0].p;
+        extra += '\n  发现同目录存在让位副本(上次替换可能被中断):\n' +
+                 cands.map(p => '    ' + require('path').basename(p)).join('\n') +
+                 '\n  可手动恢复(最新的一份): ' + (process.platform === 'win32' ? 'move /y' : 'mv -f') +
+                 ' "' + newest + '" "' + pinned + '"';
+      }
     }
     fail('找不到 Claude Code 二进制。可显式指定: cchans ' + cmd + ' <claude.exe 路径>\n' +
       '  (要求: Bun 编译的原生二进制, 体积 > 20MB)' + extra);
   }
   if (found.healed) {
     console.log('已自愈: 上次替换被中断导致二进制缺失, 已从让位副本恢复。');
+  } else if (found.healable) {
+    console.log('提示: 同目录存在让位副本, 上次替换可能被中断。跑一次 cchans patch/restore 会自动恢复。');
   }
   console.log('目标: ' + found.path + (found.version ? ' (v' + found.version + ')' : ''));
   return found;

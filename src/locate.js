@@ -116,23 +116,42 @@ function healMissing(target) {
 // 显式路径(参数 / CCHANS_TARGET)是**权威**的: 校验不过直接失败, 绝不悄悄改打别的
 // 安装位置 —— 否则用户敲错路径就会误伤另一个 claude.exe(2026-08-03 审查实证)。
 // 只有在完全没有显式指定时, 才按 PATH > 常见全局位置自动探测。
-function locate(explicit) {
+// 是否存在可用于自愈的让位副本(只探测, 不动手)
+function healable(target) {
+  try {
+    if (fs.existsSync(target)) return null;
+    const dir = path.dirname(target);
+    const prefix = path.basename(target) + ASIDE_SUFFIX;
+    const names = fs.readdirSync(dir).filter(n => n === prefix || n.startsWith(prefix + '.'));
+    const ok = names.map(n => path.join(dir, n)).filter(isClaudeBinary);
+    return ok.length ? ok : null;
+  } catch { return null; }
+}
+
+// opts.heal: 是否允许改文件系统。只有 patch/restore 传 true —— status/scan/locate
+// 是只读语义的命令, 让它们 rename 文件会违反用户预期(而且自动探测分支会对**每个**
+// 候选位置各自愈一次, 可能把用户早已卸载的安装位置"复活", 审查实证)。
+function locate(explicit, opts = {}) {
+  const heal = opts.heal === true;
   const pinned = explicit || process.env.CCHANS_TARGET || null;
   if (pinned) {
-    const healed = healMissing(pinned);
-    if (!isClaudeBinary(pinned)) return null;
+    const healed = heal ? healMissing(pinned) : false;
+    if (!isClaudeBinary(pinned)) {
+      return null;
+    }
     let real = pinned;
     try { real = fs.realpathSync(pinned); } catch {}
-    return { path: real, version: readVersion(real), healed };
+    return { path: real, version: readVersion(real), healed, healable: healable(pinned) };
   }
 
   const tried = [];
   for (const shim of whichClaude()) tried.push(...candidatesFromShim(shim));
   tried.push(...commonLocations());
 
-  let healed = false;
   for (const p of tried) {
-    if (healMissing(p)) healed = true;
+    // healed 必须绑定到最终返回的那个候选, 否则 status 可能打印"已自愈"
+    // 而说的根本不是它随后报告的那个 target(审查实证)。
+    const healed = heal ? healMissing(p) : false;
     if (isClaudeBinary(p)) {
       // 原生安装的 claude 常是符号链接(指向 versions/<版本>/ 下的真身),
       // 解析成真实路径再补丁, 避免 rename 只替换了链接本身
@@ -144,4 +163,7 @@ function locate(explicit) {
   return null;
 }
 
-module.exports = { locate, isClaudeBinary, readVersion, healMissing, BUN_TRAILER, BIN_NAME, ASIDE_SUFFIX };
+module.exports = {
+  locate, isClaudeBinary, readVersion, healMissing, healable,
+  BUN_TRAILER, BIN_NAME, ASIDE_SUFFIX,
+};
