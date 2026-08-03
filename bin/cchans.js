@@ -54,6 +54,10 @@ try {
         ' 处(词边界守卫跳过 ' + r.boundarySkips + ' 处代码内命中), 耗时 ' + r.seconds.toFixed(1) + 's');
       console.log(r.verified ? '  运行验证: 通过(--version + doctor 实跑)'
                              : '  运行验证: 已跳过(--no-verify) —— 不保证产物能启动');
+      if (r.movedAside) {
+        console.log('  注意: 目标正在运行, 已热替换(旧映像暂留 .cchans-old, 下次 patch 自动清理)。');
+        console.log('        已在运行的 Claude Code 仍用旧映像, 请重启它们才会变中文。');
+      }
       if (r.backupRefreshed) console.log('  已刷新纯英文备份(跟随当前版本)。');
       if (r.resigned === false) {
         console.log('⚠ macOS 重签名失败: 请手动执行 codesign --force --sign - "' + target + '"');

@@ -131,16 +131,71 @@ function patchBuffer(buf, dict, onProgress) {
 // 同目录写临时文件再 rename(同盘保证原子性); rename 覆盖会让 target 指向新
 // inode, 与 install 时的硬链接副本自然隔离。Windows 上目标被运行中的进程占用
 // 时 rename 抛 EBUSY/EPERM, 转成友好提示。
-function commitTmp(tmp, target) {
+// 零依赖同步 sleep(不引入 timers/promises 的异步改造)
+function sleepSync(ms) {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+}
+
+const LOCK_CODES = new Set(['EBUSY', 'EPERM', 'EACCES']);
+
+// 尽力删除临时文件: 刚写出的 253MB exe 常被杀毒软件即时扫描而短暂锁住,
+// 一次 unlink 失败就放弃会留下 253MB 垃圾, 故重试几次。
+function removeQuietly(p, attempts = 5) {
+  for (let i = 0; i < attempts; i++) {
+    try { fs.unlinkSync(p); return true; } catch (e) {
+      if (e.code === 'ENOENT') return true;
+      if (!LOCK_CODES.has(e.code) || i === attempts - 1) return false;
+      sleepSync(300 * (i + 1));
+    }
+  }
+  return false;
+}
+
+const ASIDE_SUFFIX = '.cchans-old';
+
+// 提交补丁产物, 两级策略:
+//
+// 快路径 —— 直接 rename 覆盖(同盘原子)。失败原因通常是瞬时占用: 杀毒软件正在
+// 扫描刚写出的 253MB exe, 或运行中的 Claude Code 恰好持有句柄。先重试退避。
+//
+// 慢路径 —— 实测本机同时跑着 14 个 claude 进程(交互会话 + daemon 预热的后台
+// worker)时, 重试多久都过不去。但 Windows 只禁止「删除/覆盖」运行中的 exe,
+// 「改名」是允许的(映像仍按旧名挂着, 已在跑的进程不受影响)。于是先把旧文件
+// 改名让位, 再把新文件放到原位 —— 这样用户不必关掉所有会话也能打补丁,
+// 已运行的进程继续用旧映像, 新启动的才用新的。
+// 让位后若放置失败一律回滚, 保证 target 任何时刻都存在, 绝不留下"没有 claude.exe"
+// 的中间态。旧文件此刻多半仍被映射而删不掉, 留到下次 patch 再清, 不影响正确性。
+function commitTmp(tmp, target, attempts = 3) {
+  for (let i = 0; i < attempts; i++) {
+    try {
+      fs.renameSync(tmp, target);
+      return { movedAside: false };
+    } catch (e) {
+      if (!LOCK_CODES.has(e.code)) { removeQuietly(tmp); throw e; }
+      if (i < attempts - 1) sleepSync(500 * (i + 1));
+    }
+  }
+
+  const aside = target + ASIDE_SUFFIX;
+  removeQuietly(aside);
+  try {
+    fs.renameSync(target, aside);
+  } catch (e) {
+    removeQuietly(tmp);
+    throw new Error(
+      '目标文件被占用, 且无法为其改名让位: 请关闭所有正在运行的 Claude Code\n' +
+      '  (含后台会话, 可先跑 claude agents --json 查看), 再重新执行。\n' +
+      '  你的 claude.exe 未被改动。'
+    );
+  }
   try {
     fs.renameSync(tmp, target);
   } catch (e) {
-    try { fs.unlinkSync(tmp); } catch {}
-    if (e.code === 'EBUSY' || e.code === 'EPERM' || e.code === 'EACCES') {
-      throw new Error('目标文件被占用: 请先关闭所有正在运行的 Claude Code, 再重新执行。');
-    }
-    throw e;
+    try { fs.renameSync(aside, target); } catch {} // 回滚, 保证 target 存在
+    removeQuietly(tmp);
+    throw new Error('替换失败(已回滚, claude.exe 未被改动): ' + e.message);
   }
+  return { movedAside: !removeQuietly(aside, 2) };
 }
 
 function atomicWrite(target, buf) {
@@ -205,6 +260,7 @@ function patch(target, opts = {}) {
     throw new Error('不是有效的 Claude Code 二进制(缺少 Bun 魔术串或体积过小): ' + target);
   }
   const dict = loadDict();
+  removeQuietly(target + ASIDE_SUFFIX, 1); // 清理上次热替换留下的旧映像(若已可删)
   const { source, refreshed } = resolveSource(target);
   const buf = Buffer.from(source); // 副本, 不动源
   const t0 = Date.now();
@@ -237,11 +293,12 @@ function patch(target, opts = {}) {
       }
     }
   } catch (e) {
-    try { fs.unlinkSync(tmp); } catch {}
+    removeQuietly(tmp);
     throw e;
   }
-  commitTmp(tmp, target);
+  const commit = commitTmp(tmp, target);
   return {
+    movedAside: commit.movedAside, // true=旧文件因仍在运行而暂留 .cchans-old
     keysHit: stats.keysHit,
     occurrences: stats.occurrences,
     boundarySkips: stats.boundarySkips,
