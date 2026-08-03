@@ -7568,5 +7568,57 @@
   {
     "en": "Add Claude Code GitHub Workflow",
     "zh": "添加 Claude Code GitHub 工作流"
+  },
+  {
+    "en": "Print response and exit (useful for pipes). Note: The workspace trust dialog is skipped when Claude is run in non-interactive mode (via -p, or when stdout is not a TTY, e.g. piped or redirected output). Only use this in directories you trust. Settings files that fail validation are silently ignored in this mode (no error dialog is shown).",
+    "zh": "打印响应并退出（适用于管道场景）。注意：以非交互模式运行 Claude 时（通过 -p，或 stdout 非 TTY，如管道/重定向输出）会跳过工作区信任对话框。请仅在你信任的目录中使用。此模式下校验失败的配置文件会被静默忽略（不显示错误对话框）。"
+  },
+  {
+    "en": "This archives the cloud session and stops local tracking. The review will not complete and any findings so far are discarded.",
+    "zh": "这会归档云端会话并停止本地跟踪。审查将不会完成，目前为止的所有发现都会被丢弃。"
+  },
+  {
+    "en": "Create, update, list, or run scheduled cloud agents (routines) that execute on a cron schedule.",
+    "zh": "创建、更新、列出或运行按 cron 计划执行的云端定时 Agent（routines）。"
+  },
+  {
+    "en": "Print active sessions (interactive and background) as a JSON array and exit (for scripting; does not require a TTY)",
+    "zh": "将活跃会话（交互式和后台）打印为 JSON 数组并退出（用于脚本，不需要 TTY）"
+  },
+  {
+    "en": "Return here after authenticating in your browser. Press",
+    "zh": "在浏览器中完成认证后返回此处。按"
+  },
+  {
+    "en": "report the issue at https://github.com/anthropics/claude-code/issues",
+    "zh": "请在 https://github.com/anthropics/claude-code/issues 反馈问题"
+  },
+  {
+    "en": "Effort level for the current session (",
+    "zh": "当前会话的努力程度 ("
+  },
+  {
+    "en": "Enable Option+Enter key binding for newlines and disable the audible bell (skipped in screen-reader mode)",
+    "zh": "启用 Option+Enter 换行快捷键并禁用提示音（屏幕阅读模式下跳过）"
+  },
+  {
+    "en": "Create a cloud session with the given description, or attach to an existing one by session ID or claude.ai/code URL",
+    "zh": "使用给定描述创建云端会话，或通过会话 ID 或 claude.ai/code 链接附加到已有会话"
+  },
+  {
+    "en": "Inspect or reset auto mode classifier configuration",
+    "zh": "检查或重置自动模式分类器配置"
+  },
+  {
+    "en": "Enable Remote Control locally to allow inbound control.",
+    "zh": "在本地启用远程控制以允许入站连接。"
+  },
+  {
+    "en": "No hooks configured for this event",
+    "zh": "此事件未配置任何 hook"
+  },
+  {
+    "en": "Denied by auto mode classifier",
+    "zh": "被自动模式分类器拒绝"
   }
 ]
