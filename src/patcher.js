@@ -14,6 +14,7 @@ const os = require('os');
 const path = require('path');
 const { execFileSync, spawnSync } = require('child_process');
 const { isClaudeBinary, readVersion, healMissing, ASIDE_SUFFIX } = require('./locate');
+const bunfmt = require('./bunfmt');
 
 const ROOT = path.resolve(__dirname, '..');
 const DICT_PATH = path.join(ROOT, 'dict', 'zh-Hans.json');
@@ -524,6 +525,24 @@ function cleanTmp(target) {
 // 抓住; 而若将来某版 doctor 在正常输出里打印 Bun 运行时版本, 这条会让所有人打不了
 // 补丁 —— 留着是纯风险没有收益。
 const CRASH_RE = /is not a function|panic:|Segmentation fault|Illegal instruction/i;
+
+// 乱码检测 —— 补上"只验能跑、不验显示对不对"的缺口(2026-08-03 事故: 补丁"验证通过"
+// 却一个正确中文都没有, 全是 Latin-1 炸开的乱码, 直到用户打开菜单才发现)。
+// 特征: UTF-8 解出一串 U+0080–U+00FF 的字符, 把它们按 Latin-1 转回字节后又能解出 CJK。
+// 纯英文输出不会命中; 正确渲染的中文也不会命中(它直接就解成 CJK)。
+const CJK_RE = /[一-鿿]/;
+
+function findMojibake(text) {
+  const re = /[-ÿ]{3,}/g;
+  let m;
+  while ((m = re.exec(text)) !== null) {
+    const decoded = Buffer.from(m[0], 'latin1').toString('utf8');
+    if (!decoded.includes('�') && CJK_RE.test(decoded)) {
+      return { garbled: m[0].slice(0, 20), meant: decoded.slice(0, 10) };
+    }
+  }
+  return null;
+}
 // --version 太浅(实测: 只坏了那一处的产物照样 status=0 通过), 必须叠加走完整启动
 // 路径的命令。三条都实测过: 不需要登录、无副作用、在纯英文与汉化产物上均 status=0,
 // 在事故产物上均能判失败。
@@ -549,6 +568,7 @@ function verifyRuntime(exePath) {
     ? '\\\\?\\' + exePath
     : exePath;
   try {
+    let cjkSeen = 0;
     for (const args of SMOKE_ARGS) {
       const label = args.join(' ');
       const r = spawnSync(spawnPath, args, {
@@ -565,8 +585,18 @@ function verifyRuntime(exePath) {
       if (r.status !== 0) {
         return { ok: false, kind: 'exit', reason: label + ' 退出码 ' + r.status + ': ' + firstLine };
       }
+      const moji = findMojibake(out);
+      if (moji) {
+        return { ok: false, kind: 'mojibake',
+          reason: label + ' 输出含乱码: ' + JSON.stringify(moji.garbled) + ' (本应是 ' + moji.meant + '…)' };
+      }
+      cjkSeen += (out.match(/[一-鿿]/g) || []).length;
     }
-    return { ok: true };
+    // 跑通了、也没乱码, 但一个中文都没有 => 补丁其实没生效, 同样不算成功。
+    if (cjkSeen === 0) {
+      return { ok: false, kind: 'noeffect', reason: '产物能跑但输出里没有任何中文 —— 补丁未生效' };
+    }
+    return { ok: true, cjkSeen };
   } finally {
     try { fs.rmSync(cfg, { recursive: true, force: true }); } catch {}
   }
@@ -636,6 +666,15 @@ function patchLocked(target, opts, healed, tmpRef) {
   // 最后一份纯英文原版(例如备份被误删), 先删再发现没有可用源就无法挽回了
   // (2026-08-03 审查实证)。
   const { source, refreshed, backupPath: srcBackup } = resolveSource(target);
+  // 必须先能定位主模块: 替换只在它的 JS 源码区内做, 且要关掉字节码、把源码编码
+  // 改成 UTF-8。定位不到就不能打 —— 盲目全局替换正是 2026-08-03 那次"全是乱码"
+  // 事故的根因(详见 DEVELOPMENT-NOTES §十三)。
+  const mainMod = bunfmt.findMainModule(source);
+  if (!mainMod) {
+    throw new Error('无法解析 Bun 模块结构, 已中止(你的 claude 未被改动)。\n' +
+      '  这通常意味着 Claude Code 换了打包格式, 本工具需要适配。\n' +
+      '  请到 GitHub 提 issue: ForceMind/Claude-Code-Chinese-Simplified');
+  }
   // 两道安全网必须至少有一道生效: 要么实跑验证兜底, 要么源已被 sha256 锚校验过。
   // 都缺席时, 一份"体积和尾串都完好、中段损坏"的备份会产出跑不起来的二进制并
   // 直接落地(第三轮实证的唯一不可恢复路径)。
@@ -647,7 +686,21 @@ function patchLocked(target, opts, healed, tmpRef) {
   cleanAside(target); // 已确认拿到可用的纯英文源, 此时回收陈旧让位副本才安全
   const buf = Buffer.from(source); // 副本, 不动源
   const t0 = Date.now();
-  const stats = patchBuffer(buf, dict, opts.onProgress);
+
+  // 1) 关掉 JSC 预编译字节码, 让 Bun 回退去解析 JS 源码。
+  //    不关的话: 字节码优先, 对源码的替换根本不生效; 而直接改字节码里的字符串
+  //    又必然乱码(那里是 8-bit 存储)。这 4 个字节是等长写入。
+  if (mainMod.bytecodeLength > 0) buf.writeUInt32LE(0, mainMod.bytecodeLengthAt);
+  // 2) 源码编码改成 UTF-8, 否则中文会被逐字节当成 Latin-1 字符。1 个字节, 等长。
+  if (mainMod.encoding !== bunfmt.JS_SOURCE_ENCODING_UTF8) {
+    buf.writeUInt8(bunfmt.JS_SOURCE_ENCODING_UTF8, mainMod.encodingAt);
+  }
+  // 3) 只在主模块的 JS 源码区内做等长替换, 绝不碰字节码区与原生数据区。
+  const region = buf.subarray(mainMod.sourceStart, mainMod.sourceEnd);
+  const stats = patchBuffer(region, dict, opts.onProgress);
+  stats.bytecodeDisabled = mainMod.bytecodeLength > 0;
+  stats.sourceBytes = mainMod.sourceEnd - mainMod.sourceStart;
+
   if (buf.length !== source.length) {
     throw new Error('内部错误: 补丁改变了文件长度(' + source.length + ' -> ' + buf.length + '), 已中止写入。');
   }
@@ -683,6 +736,13 @@ function patchLocked(target, opts, healed, tmpRef) {
         const cause = v.kind === 'crash'
           ? '  产物确实崩溃了 —— 词典里有条目破坏了二进制(通常是命中了 Bun 运行时/\n' +
             '  第三方库的数据区)。请到 GitHub 提 issue 并附上本条信息。'
+          : v.kind === 'mojibake'
+          ? '  中文被逐字节当成了 Latin-1 字符 —— 说明替换落到了按单字节存储的区域\n' +
+            '  (通常是 JSC 字节码), 或源码编码字段没被正确改成 UTF-8。这是本工具的\n' +
+            '  bug, 请到 GitHub 提 issue 并附上本条信息。'
+          : v.kind === 'noeffect'
+          ? '  补丁没有实际生效 —— 可能是 Claude Code 换了打包方式(例如源码不再被解析)。\n' +
+            '  请到 GitHub 提 issue 并附上你的 Claude Code 版本号。'
           : '  注意: 这未必是词典的问题 —— 也可能是杀毒软件拦截了刚写出的临时文件、\n' +
             '  权限不足, 或运行环境异常。可先重试一次; 确认是词典问题再提 issue。';
         throw new Error(

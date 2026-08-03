@@ -7,6 +7,7 @@ const fs = require('fs');
 const path = require('path');
 const { looksTranslated, BACKUP_SUFFIX } = require('./patcher');
 const { readVersion } = require('./locate');
+const bunfmt = require('./bunfmt');
 
 const ROOT = path.resolve(__dirname, '..');
 const SAFE_PATH = path.join(ROOT, 'dict', 'zh-Hans.json');
@@ -44,7 +45,11 @@ function countHits(buf, needle, cap) {
 }
 
 function scan(target, opts = {}) {
-  const { buf, from } = resolveBaseline(target);
+  const { buf: whole, from } = resolveBaseline(target);
+  // 只统计主模块 JS 源码区 —— patch 现在也只在这个窗口内替换(字节码/原生区的
+  // 命中要么无效要么乱码, 详见 DEVELOPMENT-NOTES §十三)。解析失败则退回全文件。
+  const mainMod = bunfmt.findMainModule(whole);
+  const buf = mainMod ? whole.subarray(mainMod.sourceStart, mainMod.sourceEnd) : whole;
   const safe = JSON.parse(fs.readFileSync(SAFE_PATH, 'utf8'));
   const over = fs.existsSync(OVER_PATH) ? JSON.parse(fs.readFileSync(OVER_PATH, 'utf8')) : {};
 
