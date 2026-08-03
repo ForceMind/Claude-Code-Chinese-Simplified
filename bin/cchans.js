@@ -50,14 +50,16 @@ try {
         onVerify: () => { endProgress(); console.log('验证中(实跑补丁产物, 约 10s)…'); },
       });
       endProgress();
+      if (r.healed) console.log('  已自愈: 检测到上次替换被中断, 已从让位副本恢复 claude 二进制。');
       console.log('✓ 完成: ' + r.keysHit + '/' + r.dictTotal + ' 词条命中, 共替换 ' + r.occurrences +
-        ' 处(词边界守卫跳过 ' + r.boundarySkips + ' 处代码内命中), 耗时 ' + r.seconds.toFixed(1) + 's');
-      console.log(r.verified ? '  运行验证: 通过(--version + doctor 实跑)'
+        ' 处(守卫跳过: 标识符内 ' + r.boundarySkips + ' 处 / 原生常量池 ' + r.poolSkips +
+        ' 处), 耗时 ' + r.seconds.toFixed(1) + 's');
+      console.log(r.verified ? '  运行验证: 通过(--version + doctor + mcp list 实跑)'
                              : '  运行验证: 已跳过(--no-verify) —— 不保证产物能启动');
       if (r.movedAside) {
-        console.log('  注意: 目标正在运行, 已热替换(旧映像暂留 .cchans-old, 下次 patch 自动清理)。');
-        console.log('        已在运行的 Claude Code 仍用旧映像, 请重启它们才会变中文。');
+        console.log('  注意: 目标正在运行, 已热替换(旧映像暂留 .cchans-old.*, 下次 patch 自动清理)。');
       }
+      console.log('  已在运行的 Claude Code 仍用旧映像, 需重启它们才会变中文。');
       if (r.backupRefreshed) console.log('  已刷新纯英文备份(跟随当前版本)。');
       if (r.resigned === false) {
         console.log('⚠ macOS 重签名失败: 请手动执行 codesign --force --sign - "' + target + '"');
@@ -74,7 +76,12 @@ try {
     case 'restore': {
       const { path: target } = requireTarget();
       const r = patcher.restore(target);
+      if (r.healed) console.log('  已自愈: 检测到上次替换被中断, 已从让位副本恢复 claude 二进制。');
       console.log('✓ 已还原纯英文: ' + r.restoredFrom + ' -> ' + target);
+      if (r.movedAside) {
+        console.log('  注意: 目标正在运行, 已热替换(旧映像暂留 .cchans-old.*, 下次 patch 自动清理)。');
+      }
+      console.log('  已在运行的 Claude Code 仍用旧映像(中文), 需重启它们才会变回英文。');
       break;
     }
     case 'status': {
@@ -115,6 +122,7 @@ try {
         '',
         '用法:',
         '  cchans patch [路径]     打补丁(自动定位/备份/可重复执行/实跑验证)',
+        '                          --no-verify 跳过实跑验证(不推荐, 不保证产物能启动)',
         '  cchans restore [路径]   还原纯英文',
         '  cchans status [路径]    查看状态',
         '  cchans scan [路径]      覆盖扫描 + 词典滞后诊断(--json 完整输出 / --prompt 生成翻译任务提示词)',

@@ -33,13 +33,18 @@ const asciiPrintable = s => /^[\x20-\x7e]+$/.test(s);
 // 替换后仍会与被填充的字符串键 "沙盒 " 不一致 → 语义损坏。整词剔除。
 const bareIdentWord = en => /^[A-Za-z][A-Za-z0-9_$]*$/.test(en);
 
-// 危险词条黑名单(实证会破坏二进制, 详见 DEVELOPMENT-NOTES §十一):
-// 补丁扫的是整个二进制, 不只是 Claude Code 自己的 JS —— 还会扫到 Bun 运行时的
-// 原生标识符表。" to cancel" 的 40 处命中里有 1 处落在该表的
-// "could not find stream to cancel" 上(紧邻 preventCancel / oncancel 等流属性名),
-// 覆写后原生流对象拿不到 cancel 方法, claude 启动即
-// TypeError: ptr.cancel is not a function。整词剔除(损失 39 处正常界面文案)。
-const DANGEROUS = new Set([' to cancel']);
+// 危险词条黑名单(实证会破坏二进制, 详见 DEVELOPMENT-NOTES §十一)。
+//
+// 只收「结构守卫抓不到」的那一类。patcher 的原生常量池守卫已经能按机制跳过
+// 「落在 NUL 分隔的紧凑字符串表里」的命中(如 " to cancel" 那处), 那类不必列在这里
+// —— 列了反而会连累同一词条在界面上的正常命中(" to cancel" 另有 39 处是正常文案)。
+//
+// 这里只放**嵌在连续文本模板里的协议常量**: 周围没有 NUL, 结构守卫看不见它们。
+// "Version: " 命中 Bun 的 WebSocket 握手请求头模板
+// (`Sec-WebSocket-Version: 13` -> `Sec-WebSocket-版本：13`), 服务端按 RFC6455
+// 必然拒绝 -> Remote Control / IDE 集成 / ws 传输的 MCP 全部连不上。
+// 而 --version / doctor / mcp list 都不开 WebSocket, 运行时验证抓不到, 只能靠黑名单。
+const DANGEROUS = new Set(['Version: ']);
 
 // zh 引入了 en 没有的字面量危险字符 → 可能破坏 JS 字符串语法
 const zhUnsafe = (en, zh) => {
@@ -62,10 +67,15 @@ const safe = {};
 const oversize = {};
 let total = 0, kept = 0, over = 0, skipped = 0, placeholder = 0, unsafe = 0, tooShort = 0, bareWord = 0, dangerous = 0;
 
+const seen = new Set();
+let duplicate = 0;
+
 for (const item of src) {
   total++;
   const en = item && item.en, zh = item && item.zh;
   if (!en || !zh || en === zh) { skipped++; continue; }
+  if (seen.has(en)) { duplicate++; continue; } // 上游词典有重复 en, 否则计数会虚高
+  seen.add(en);
   if (!asciiPrintable(en)) { skipped++; continue; }   // en 必须是可打印 ASCII 才能在二进制里定位
   if (!hasHan(zh)) { skipped++; continue; }            // zh 必须含中文, 否则不是有效翻译
   if (en.includes('${')) { placeholder++; continue; }  // 抽取态占位符, 永远打不中且版本锁死
@@ -97,6 +107,7 @@ const report = {
   语法不安全剔除: unsafe,
   裸标识符词剔除: bareWord,
   危险词条剔除: dangerous,
+  重复条目剔除: duplicate,
   过短剔除: tooShort,
   无效跳过: skipped,
   覆盖率: (kept / (kept + over) * 100).toFixed(1) + '%',

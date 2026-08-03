@@ -67,8 +67,15 @@ function resolveSource(target) {
     return { source: buf, backupPath, refreshed: true };
   }
 
-  // target 已汉化 → 必须有纯英文备份作源
+  // target 已汉化 → 必须有纯英文备份作源。
+  // 必须校验备份完整(含 Bun 魔术串 + 体积下限): 若上次写备份时磁盘满而被截断,
+  // 长度断言(比较的是 buf 与 source, 两者同源)照样通过, 加 --no-verify 就会把
+  // 一个截断的二进制盖到 target 上, 且备份也已经是坏的 —— 只能重装。
   if (fs.existsSync(backupPath)) {
+    if (!isClaudeBinary(backupPath)) {
+      throw new Error('备份文件不完整(可能上次写盘中断被截断), 拒绝作为补丁源: ' + backupPath +
+        '\n  请重装或升级 Claude Code 得到纯英文版本后重试。');
+    }
     const b = fs.readFileSync(backupPath);
     if (!looksTranslated(b)) return { source: b, backupPath, refreshed: false };
     throw new Error('备份文件 ' + backupPath + ' 本身已被汉化, 不能作源。请重装/升级 Claude Code 后重试。');
@@ -99,9 +106,43 @@ const isIdByte = b =>
   (b >= 0x41 && b <= 0x5a) || (b >= 0x61 && b <= 0x7a) ||
   (b >= 0x30 && b <= 0x39) || b === 0x5f || b === 0x24;
 
+// 原生常量池守卫(第二道守卫, 2026-08-03 事故后新增, 详见 DEVELOPMENT-NOTES §十一)。
+//
+// 事故机理是「字符串尾部合并」: 链接器把短标识符与以它结尾的长消息**共享存储**——
+// JSC 属性名 cancel 就是消息 "could not find stream to cancel" 的末 6 字节切片
+// (实证: 整个 78-84MB 原生区内不存在独立的 \0cancel\0 表项)。于是覆写消息尾部
+// = 直接摧毁属性名 -> claude 启动即 TypeError: ptr.cancel is not a function。
+// 词边界守卫看的是命中点紧邻字节, 对这种情况完全无感。
+//
+// 判据(纯字节级, 不解析任何可执行格式, 与 Bun/CC 版本无关):
+//   C/C++ 原生字面量池 = 「单个 NUL 分隔的紧凑短串」-> 邻域内孤立 NUL 密集;
+//   而 Bun 存放 CC 自己的 JS 字符串用 {ptr,len} 结构, 周围是成串的 NUL 填充。
+// 故: 邻域孤立 NUL >= MIN_ISOLATED 且不含长度 >= MAX_RUN 的 NUL 串 -> 判为原生池。
+//
+// 实测区分力(对 v2.1.220 全词典 4768 处命中): 精确标出事故元凶那一处(40 中 1),
+// 界面文案零假阳性, 全词典共标出 37 处 / 9 条词条(均为 Bun/SQLite/JSC 内部串)。
+// 注意它只覆盖「字符串表」这一类; 嵌在连续文本模板里的协议常量(如 WebSocket
+// 握手头的 "Sec-WebSocket-Version: 13")周围没有 NUL, 抓不到, 那类走词典黑名单。
+const POOL_WIN = 40, POOL_MIN_ISOLATED = 3, POOL_MAX_RUN = 4;
+
+function inNativePool(buf, idx, len) {
+  const s = Math.max(0, idx - POOL_WIN);
+  const e = Math.min(buf.length, idx + len + POOL_WIN);
+  let isolated = 0, run = 0, maxRun = 0;
+  for (let i = s; i < e; i++) {
+    if (buf[i] === 0) { run++; continue; }
+    if (run > maxRun) maxRun = run;
+    if (run === 1) isolated++;
+    run = 0;
+  }
+  if (run > maxRun) maxRun = run;
+  if (maxRun >= POOL_MAX_RUN) return false;
+  return isolated >= POOL_MIN_ISOLATED;
+}
+
 function patchBuffer(buf, dict, onProgress) {
   const keys = Object.keys(dict);
-  let keysHit = 0, occurrences = 0, boundarySkips = 0;
+  let keysHit = 0, occurrences = 0, boundarySkips = 0, poolSkips = 0;
   for (let k = 0; k < keys.length; k++) {
     const en = keys[k];
     const enBuf = Buffer.from(en, 'utf8');
@@ -117,6 +158,11 @@ function patchBuffer(buf, dict, onProgress) {
         from = idx + 1; // 命中在标识符内部, 跳过
         continue;
       }
+      if (inNativePool(buf, idx, enBuf.length)) {
+        poolSkips++;
+        from = idx + enBuf.length; // 命中在原生字符串池, 跳过(可能被尾部合并引用)
+        continue;
+      }
       zhBuf.copy(buf, idx);
       buf.fill(0x20, idx + zhBuf.length, idx + enBuf.length); // 空格填充到原长
       hits++;
@@ -125,7 +171,7 @@ function patchBuffer(buf, dict, onProgress) {
     if (hits) { keysHit++; occurrences += hits; }
     if (onProgress && (k + 1) % 50 === 0) onProgress(k + 1, keys.length, keysHit);
   }
-  return { keysHit, occurrences, boundarySkips };
+  return { keysHit, occurrences, boundarySkips, poolSkips };
 }
 
 // 同目录写临时文件再 rename(同盘保证原子性); rename 覆盖会让 target 指向新
@@ -136,7 +182,22 @@ function sleepSync(ms) {
   Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
 }
 
-const LOCK_CODES = new Set(['EBUSY', 'EPERM', 'EACCES']);
+// Windows 上 EACCES 多半是杀软/句柄占用(瞬时, 值得重试); POSIX 上它几乎总是
+// 权限不足(root 拥有的 /usr/local/lib/node_modules 等), 重试纯属浪费且会误导用户。
+const LOCK_CODES = process.platform === 'win32'
+  ? new Set(['EBUSY', 'EPERM', 'EACCES'])
+  : new Set(['EBUSY', 'ETXTBSY']);
+
+// fs.writeFileSync 建出来的新文件是 0o666 & ~umask(POSIX 上通常 0644, 无执行位),
+// 而 rename 不继承目标路径原有的权限位 —— 若不补执行位, 产物在 macOS/Linux 上
+// 根本跑不起来(verifyRuntime 直接 EACCES, restore 还原出的 claude 也不可执行)。
+// Windows 不看权限位, 所以这个洞此前一直没暴露。
+function inheritExecMode(tmp, target) {
+  if (process.platform === 'win32') return;
+  let mode = 0o755;
+  try { mode = fs.statSync(target).mode & 0o777; } catch {}
+  try { fs.chmodSync(tmp, mode | 0o111); } catch {}
+}
 
 // 尽力删除临时文件: 刚写出的 253MB exe 常被杀毒软件即时扫描而短暂锁住,
 // 一次 unlink 失败就放弃会留下 253MB 垃圾, 故重试几次。
@@ -176,32 +237,80 @@ function commitTmp(tmp, target, attempts = 3) {
     }
   }
 
-  const aside = target + ASIDE_SUFFIX;
-  removeQuietly(aside);
+  // aside 用唯一名: 固定名会在「上次热替换留下的 .cchans-old 仍被老进程映射」时
+  // 撞上 EPERM(实测), 导致热替换只能连用一次 —— 而「不必关闭 Claude Code」正是
+  // 它的卖点。带时间戳后每次让位都有独立槽位, 陈旧的由 cleanAside() 统一回收。
+  const aside = target + ASIDE_SUFFIX + '.' + Date.now();
   try {
     fs.renameSync(target, aside);
   } catch (e) {
     removeQuietly(tmp);
     throw new Error(
-      '目标文件被占用, 且无法为其改名让位: 请关闭所有正在运行的 Claude Code\n' +
-      '  (含后台会话, 可先跑 claude agents --json 查看), 再重新执行。\n' +
+      '目标文件被占用, 且无法为其改名让位(' + e.code + '): 请关闭所有正在运行的\n' +
+      '  Claude Code(含后台会话, 可先跑 claude agents --json 查看), 再重新执行。\n' +
       '  你的 claude.exe 未被改动。'
     );
   }
   try {
     fs.renameSync(tmp, target);
   } catch (e) {
-    try { fs.renameSync(aside, target); } catch {} // 回滚, 保证 target 存在
+    // 回滚必须如实上报: 若回滚也失败, 此刻磁盘上没有 claude.exe, 谎称"未被改动"
+    // 会让唯一能自救的用户放弃自救。必须把 aside 的绝对路径交给用户。
+    let rolledBack = true;
+    try { fs.renameSync(aside, target); } catch { rolledBack = false; }
     removeQuietly(tmp);
-    throw new Error('替换失败(已回滚, claude.exe 未被改动): ' + e.message);
+    if (rolledBack) {
+      throw new Error('替换失败(已回滚, claude.exe 未被改动): ' + e.message);
+    }
+    throw new Error(
+      '替换失败且回滚失败 —— 此刻 claude.exe 不存在, 请手动恢复:\n' +
+      '    ' + (process.platform === 'win32' ? 'move /y ' : 'mv -f ') + '"' + aside + '" "' + target + '"\n' +
+      '  原始错误: ' + e.message
+    );
   }
   return { movedAside: !removeQuietly(aside, 2) };
 }
 
+// 回收所有陈旧的让位副本(每个都是一份完整二进制, 253MB 起步)。
+// 仍被运行中的进程映射的删不掉, 留到下次再清即可。
+function cleanAside(target) {
+  const dir = path.dirname(target);
+  const prefix = path.basename(target) + ASIDE_SUFFIX;
+  let names = [];
+  try { names = fs.readdirSync(dir); } catch { return; }
+  for (const n of names) {
+    if (n.startsWith(prefix)) removeQuietly(path.join(dir, n), 1);
+  }
+}
+
+// 上次热替换若在「已让位、新文件尚未就位」的微秒级窗口里被强杀/断电, target 会
+// 缺失。此时磁盘上躺着完好的让位副本, 却因为 isClaudeBinary 先行拦截而报
+// "不是有效的 Claude Code 二进制", 用户只能重装 —— 故开机先自愈。
+function healInterrupted(target) {
+  if (fs.existsSync(target)) return false;
+  const dir = path.dirname(target);
+  const prefix = path.basename(target) + ASIDE_SUFFIX;
+  let names = [];
+  try { names = fs.readdirSync(dir); } catch { return false; }
+  const candidates = names.filter(n => n.startsWith(prefix)).sort(); // 时间戳升序, 取最新
+  for (const n of candidates.reverse()) {
+    const p = path.join(dir, n);
+    if (!isClaudeBinary(p)) continue;
+    try { fs.renameSync(p, target); return true; } catch {}
+  }
+  return false;
+}
+
 function atomicWrite(target, buf) {
   const tmp = target + '.cchans-tmp';
-  fs.writeFileSync(tmp, buf);
-  commitTmp(tmp, target);
+  try {
+    fs.writeFileSync(tmp, buf);
+    inheritExecMode(tmp, target);
+  } catch (e) {
+    removeQuietly(tmp);
+    throw e;
+  }
+  return commitTmp(tmp, target);
 }
 
 // 运行时冒烟验证 —— 本工具最重要的安全网(2026-08-03 血的教训, 详见 §十一)。
@@ -213,8 +322,14 @@ function atomicWrite(target, buf) {
 //
 // 结论: 只有「产物真跑通」才算补丁成功。跑通前绝不覆盖用户的 claude.exe。
 // 用独立的 CLAUDE_CONFIG_DIR, 避免验证过程污染用户的真实会话/daemon 状态。
-const CRASH_RE = /is not a function|Bun v\d|panic:|Segmentation fault|Illegal instruction/i;
-const SMOKE_ARGS = [['--version'], ['doctor']]; // --version 太浅(补丁坏了也能过), 必须叠加 doctor
+// 不含 /Bun v\d/: 实测复现事故产物时崩溃输出里并没有 Bun 版本横幅, 退出码 1 已足够
+// 抓住; 而若将来某版 doctor 在正常输出里打印 Bun 运行时版本, 这条会让所有人打不了
+// 补丁 —— 留着是纯风险没有收益。
+const CRASH_RE = /is not a function|panic:|Segmentation fault|Illegal instruction/i;
+// --version 太浅(实测: 只坏了那一处的产物照样 status=0 通过), 必须叠加走完整启动
+// 路径的命令。三条都实测过: 不需要登录、无副作用、在纯英文与汉化产物上均 status=0,
+// 在事故产物上均能判失败。
+const SMOKE_ARGS = [['--version'], ['doctor'], ['mcp', 'list']];
 
 function verifyRuntime(exePath) {
   let cfg;
@@ -223,18 +338,30 @@ function verifyRuntime(exePath) {
   } catch (e) {
     return { ok: false, reason: '无法创建临时配置目录: ' + e.message };
   }
+  // 剥掉会让子进程以为"自己跑在 Claude Code 里"的继承变量(README 主推的用法恰恰
+  // 是在 CC 内部跑 patch), 并显式关掉自动更新器 —— 验证过程绝不能让 CC 在打补丁
+  // 中途把 claude.exe 换成新版(§十 记录过 daemon 自更新打架的前科)。
+  const env = { ...process.env, CLAUDE_CONFIG_DIR: cfg, DISABLE_AUTOUPDATER: '1' };
+  for (const k of Object.keys(env)) {
+    if (k === 'CLAUDECODE' || k.startsWith('CLAUDE_CODE_')) delete env[k];
+  }
   try {
     for (const args of SMOKE_ARGS) {
       const label = args.join(' ');
       const r = spawnSync(exePath, args, {
-        env: { ...process.env, CLAUDE_CONFIG_DIR: cfg },
-        encoding: 'utf8', timeout: 120000, windowsHide: true,
+        env, encoding: 'utf8', timeout: 120000, windowsHide: true,
       });
-      if (r.error) return { ok: false, reason: label + ' 无法运行: ' + r.error.message };
+      if (r.error) {
+        return { ok: false, kind: 'spawn', reason: label + ' 无法运行: ' + r.error.message };
+      }
       const out = ((r.stdout || '') + (r.stderr || '')).trim();
       const firstLine = out.split('\n')[0] || '(无输出)';
-      if (CRASH_RE.test(out)) return { ok: false, reason: label + ' 输出含崩溃特征: ' + firstLine };
-      if (r.status !== 0) return { ok: false, reason: label + ' 退出码 ' + r.status + ': ' + firstLine };
+      if (CRASH_RE.test(out)) {
+        return { ok: false, kind: 'crash', reason: label + ' 输出含崩溃特征: ' + firstLine };
+      }
+      if (r.status !== 0) {
+        return { ok: false, kind: 'exit', reason: label + ' 退出码 ' + r.status + ': ' + firstLine };
+      }
     }
     return { ok: true };
   } finally {
@@ -256,11 +383,13 @@ function resignIfDarwin(target) {
 }
 
 function patch(target, opts = {}) {
+  const healed = healInterrupted(target); // 必须在 isClaudeBinary 之前
   if (!isClaudeBinary(target)) {
     throw new Error('不是有效的 Claude Code 二进制(缺少 Bun 魔术串或体积过小): ' + target);
   }
   const dict = loadDict();
-  removeQuietly(target + ASIDE_SUFFIX, 1); // 清理上次热替换留下的旧映像(若已可删)
+  cleanAside(target);                       // 回收陈旧的让位副本
+  removeQuietly(target + '.cchans-tmp', 1); // 回收上次写盘失败留下的半成品
   const { source, refreshed } = resolveSource(target);
   const buf = Buffer.from(source); // 副本, 不动源
   const t0 = Date.now();
@@ -274,21 +403,37 @@ function patch(target, opts = {}) {
   // 先落临时文件 → (macOS 重签名) → 实跑验证 → 通过才 rename 覆盖 target。
   // 验证不通过时 target 保持原样, 用户环境不受任何影响。
   const tmp = target + '.cchans-tmp';
-  fs.writeFileSync(tmp, buf);
   let resigned = null;
   let verified = null;
   try {
+    fs.writeFileSync(tmp, buf); // 必须在 try 内: 磁盘满时才不会留下 253MB 残骸
+    inheritExecMode(tmp, target);
     resigned = resignIfDarwin(tmp);
+    if (resigned === false) {
+      // 签名无效的二进制在 Apple Silicon 上会被内核 SIGKILL, 验证必然失败。
+      // 若不在此单独抛出, 用户拿到的会是"词典破坏了二进制"这种完全错误的诊断。
+      throw new Error(
+        'macOS 重签名失败(codesign 不可用或被拒), 已中止, 你的 claude 未被改动。\n' +
+        '  请确认已安装 Xcode Command Line Tools: xcode-select --install'
+      );
+    }
     if (opts.verify !== false) {
       if (opts.onVerify) opts.onVerify();
       const v = verifyRuntime(tmp);
       verified = v.ok;
       if (!v.ok) {
+        // 归因要诚实: 只有 kind==='crash' 才有把握说是词典破坏了二进制。
+        // spawn/exit 失败更可能是杀软拦截、权限、环境问题, 一口咬定"词典有问题"
+        // 会把用户引向错误的方向, 还会给上游带来一批伪 issue。
+        const cause = v.kind === 'crash'
+          ? '  产物确实崩溃了 —— 词典里有条目破坏了二进制(通常是命中了 Bun 运行时/\n' +
+            '  第三方库的数据区)。请到 GitHub 提 issue 并附上本条信息。'
+          : '  注意: 这未必是词典的问题 —— 也可能是杀毒软件拦截了刚写出的临时文件、\n' +
+            '  权限不足, 或运行环境异常。可先重试一次; 确认是词典问题再提 issue。';
         throw new Error(
           '补丁产物运行验证失败: ' + v.reason + '\n' +
-          '  已中止写入, 你的 claude.exe 未被改动(仍是打补丁前的状态)。\n' +
-          '  这说明词典里有条目破坏了二进制(通常是命中了 Bun 运行时/第三方库的数据区)。\n' +
-          '  请到 GitHub 提 issue: ForceMind/Claude-Code-Chinese-Simplified'
+          '  已中止写入, 你的 claude.exe 未被改动(仍是打补丁前的状态)。\n' + cause + '\n' +
+          '  仓库: ForceMind/Claude-Code-Chinese-Simplified'
         );
       }
     }
@@ -298,10 +443,12 @@ function patch(target, opts = {}) {
   }
   const commit = commitTmp(tmp, target);
   return {
-    movedAside: commit.movedAside, // true=旧文件因仍在运行而暂留 .cchans-old
+    healed,                        // true=自愈了上次中断留下的缺失 target
+    movedAside: commit.movedAside, // true=旧映像仍在运行, 暂留 .cchans-old.<时间戳>
     keysHit: stats.keysHit,
     occurrences: stats.occurrences,
     boundarySkips: stats.boundarySkips,
+    poolSkips: stats.poolSkips,
     dictTotal: Object.keys(dict).length,
     backupRefreshed: refreshed,
     seconds: (Date.now() - t0) / 1000,
@@ -312,16 +459,21 @@ function patch(target, opts = {}) {
 }
 
 function restore(target) {
+  const healed = healInterrupted(target);
   const backupPath = target + BACKUP_SUFFIX;
   if (!fs.existsSync(backupPath)) {
     throw new Error('找不到备份: ' + backupPath);
+  }
+  if (!isClaudeBinary(backupPath)) {
+    throw new Error('备份文件不是完整的 Claude Code 二进制(可能上次写盘中断被截断), 拒绝还原: ' + backupPath);
   }
   const buf = fs.readFileSync(backupPath);
   if (looksTranslated(buf)) {
     throw new Error('备份文件本身已被汉化, 拒绝还原(会覆盖不掉中文)。请重装 Claude Code。');
   }
-  atomicWrite(target, buf);
-  return { restoredFrom: backupPath };
+  cleanAside(target);
+  const commit = atomicWrite(target, buf);
+  return { restoredFrom: backupPath, healed, movedAside: commit.movedAside };
 }
 
 function status(target) {
