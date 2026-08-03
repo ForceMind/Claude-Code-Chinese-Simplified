@@ -74,7 +74,7 @@ try {
         console.log('  这是本工具唯一能拦住"补丁把二进制改坏"的安全网 —— 关掉它意味着');
         console.log('  一个跑不起来的 claude 可能直接盖掉你现在能用的那个。仅在明知后果时使用。');
       }
-      console.log('打补丁中(全量扫描约 1 分钟, 请稍候)…');
+      console.log('打补丁中(扫描主模块源码区约半分钟, 请稍候)…');
       const r = patcher.patch(target, {
         onProgress: progress('词条'),
         verify: !flags.has('--no-verify'),

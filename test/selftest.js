@@ -238,6 +238,74 @@ test('词典: 按英文字节长度降序(先替长串, 避免子串抢先命中
   }
 });
 
+
+// ── 8. bunfmt: 全项目最格式耦合的 104 行, 必须有合成断言 ────────────────
+const bunfmt = require('../src/bunfmt');
+
+// 合成一个最小 Bun blob: [前缀垃圾][name][contents][模块表][Offsets][trailer]
+function makeSyntheticBun(opts = {}) {
+  const name = Buffer.from(opts.name || 'B:/~BUN/root/src/entrypoints/cli.js', 'utf8');
+  const contents = Buffer.from(opts.contents || 'console.log(1) // padding padding', 'utf8');
+  const structSize = opts.structSize || 52;
+  const prefix = Buffer.alloc(64, 0xAA);
+  // blob 内布局: name @0, contents 紧随, 模块表随后
+  const nameOff = 0, contentsOff = name.length;
+  const tableOff = contentsOff + contents.length;
+  const rec = Buffer.alloc(structSize);
+  rec.writeUInt32LE(nameOff, 0); rec.writeUInt32LE(name.length, 4);        // name
+  rec.writeUInt32LE(contentsOff, 8); rec.writeUInt32LE(contents.length, 12); // contents
+  // sourcemap @16 置零
+  rec.writeUInt32LE(0, 24); rec.writeUInt32LE(opts.bytecodeLen ?? 12345, 28); // bytecode
+  const encAt = structSize === 52 ? 48 : 32;
+  rec.writeUInt8(opts.encoding ?? 1, encAt);
+  const byteCount = tableOff + rec.length;               // Offsets 在 blob 内的偏移
+  const offsets = Buffer.alloc(32);
+  offsets.writeBigUInt64LE(BigInt(byteCount), 0);
+  offsets.writeUInt32LE(tableOff, 8); offsets.writeUInt32LE(rec.length, 12); // modulesPtr
+  const trailer = Buffer.from('\n---- Bun! ----\n');
+  return { buf: Buffer.concat([prefix, name, contents, rec, offsets, trailer]),
+           blobBase: prefix.length, contentsOff, contentsLen: contents.length };
+}
+
+test('bunfmt: 合成 blob(52 字节结构)解析出正确的源码区/字段偏移', () => {
+  const { buf, blobBase, contentsOff, contentsLen } = makeSyntheticBun();
+  const m = bunfmt.findMainModule(buf);
+  assert.ok(m, 'findMainModule 应成功');
+  assert.strictEqual(m.sourceStart, blobBase + contentsOff);
+  assert.strictEqual(m.sourceEnd, blobBase + contentsOff + contentsLen);
+  assert.strictEqual(m.encoding, 1);
+  assert.strictEqual(m.bytecodeLength, 12345);
+  // 按解析出的偏移写回, 应恰好落在原字段上
+  const copy = Buffer.from(buf);
+  copy.writeUInt32LE(0, m.bytecodeLengthAt);
+  copy.writeUInt8(0, m.encodingAt);
+  const m2 = bunfmt.findMainModule(copy);
+  assert.strictEqual(m2.bytecodeLength, 0);
+  assert.strictEqual(m2.encoding, 0);
+});
+
+test('bunfmt: 36 字节旧结构同样解析正确', () => {
+  const { buf, blobBase, contentsOff } = makeSyntheticBun({ structSize: 36, encoding: 1 });
+  const m = bunfmt.findMainModule(buf);
+  assert.ok(m, '旧结构应可解析');
+  assert.strictEqual(m.sourceStart, blobBase + contentsOff);
+  assert.strictEqual(m.encoding, 1);
+});
+
+test('bunfmt: 模块名不匹配 -> findMainModule 返回 null(不误认)', () => {
+  const { buf } = makeSyntheticBun({ name: 'B:/~BUN/root/other-module.js' });
+  assert.strictEqual(bunfmt.findMainModule(buf), null);
+});
+
+test('bunfmt: 截断/伪造的结构 -> 安全返回 null 而非错位解析', () => {
+  const { buf } = makeSyntheticBun();
+  assert.strictEqual(bunfmt.findMainModule(buf.slice(0, buf.length - 20)), null, '截掉 trailer');
+  const bad = Buffer.from(buf);
+  bad.writeBigUInt64LE(BigInt(999999), bad.length - 48);  // byteCount 破坏
+  assert.strictEqual(bunfmt.findMainModule(bad), null, 'byteCount 不自洽');
+  assert.strictEqual(bunfmt.findMainModule(Buffer.from('no trailer here')), null, '无 trailer');
+});
+
 // ── 汇总 ────────────────────────────────────────────────────────────────
 try { fs.rmSync(tmpRoot, { recursive: true, force: true }); } catch {}
 

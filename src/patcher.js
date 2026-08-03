@@ -4,7 +4,9 @@
 // 原理: Bun 单文件二进制内嵌的是 JS 源码文本, 运行时不校验其完整性(实证:
 // 被 claude-code-zh-cn 重打包汉化过的 claude.exe 照常运行)。等长原地替换
 // 是重打包的严格子集 —— 中文 UTF-8 写入槽位起始, 0x20 空格填充到英文原长,
-// 文件字节长度不变、不动任何偏移表 → 无需解析 Bun 结构, 零依赖。
+// 文件字节长度不变、不动偏移表、零依赖。会解析 Bun 模块表的**最外层**(纯字节
+// 算术, 见 bunfmt.js): 把替换限定在主模块 JS 源码区、关掉 JSC 字节码、把源码
+// 编码字段改为 UTF-8 —— 缺任何一步, 替换要么不生效要么必然乱码(§十三)。
 //
 // 幂等/跟随新版: 始终从「纯英文备份」出发打补丁, 不增量叠加。
 // target 是纯英文(新装或刚升级) → 刷新备份; 已汉化 → 用现有备份作源。
@@ -347,7 +349,7 @@ function releaseLock(lock) {
   if (lock) removeQuietly(lock, 2);
 }
 
-// Ctrl+C / kill 时释放锁并清掉临时文件。patch 全程 60~90 秒同步计算, 正是用户
+// Ctrl+C / kill 时释放锁并清掉临时文件。patch 全程约 30~60 秒同步计算, 正是用户
 // 最容易以为卡死而中断的时长 —— 没有这个处理器就会留下死锁 + 253MB 孤儿(审查实证)。
 function installCleanupHandlers(lock, tmpRef) {
   const onSignal = sig => {
@@ -615,7 +617,7 @@ function resignIfDarwin(target) {
   }
 }
 
-// 开扫之前先探一次写权限: 全量扫描要 60~90 秒, 若目标目录不可写(Linux/macOS 上
+// 开扫之前先探一次写权限: 扫描+验证要 30~60 秒, 若目标目录不可写(Linux/macOS 上
 // npm 全局目录常归 root), 让用户白等一分半再吐一条裸 EACCES 是很糟的体验 ——
 // 这也是非 Windows 平台最常见的失败模式(审查实证)。
 function assertWritable(target) {
