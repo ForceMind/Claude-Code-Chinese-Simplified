@@ -24,6 +24,29 @@ function loadDict() {
   return JSON.parse(fs.readFileSync(DICT_PATH, 'utf8'));
 }
 
+// 备份完整性锚。isClaudeBinary 只查体积 + 尾部魔术串, 拦得住"被截断", 拦不住
+// "体积和尾串都完好、但中段损坏"—— 实测这种备份配上 --no-verify 会让段错误的
+// 二进制盖掉用户唯一的 claude.exe, 且备份同时失效, 只能重装(审查实证)。
+// 故写备份时同步落一份 sha256 旁文件, 用它作源之前先校验。253MB 算一次约 1s。
+const SHA_SUFFIX = '.sha256';
+
+function sha256(buf) {
+  return require('crypto').createHash('sha256').update(buf).digest('hex');
+}
+
+function writeBackup(backupPath, buf) {
+  fs.writeFileSync(backupPath, buf);
+  try { fs.writeFileSync(backupPath + SHA_SUFFIX, sha256(buf)); } catch {}
+}
+
+// 返回 true=校验通过或无锚可校验; false=锚存在且对不上(备份已损坏)
+function backupIntact(backupPath, buf) {
+  let want;
+  try { want = fs.readFileSync(backupPath + SHA_SUFFIX, 'utf8').trim(); } catch { return true; }
+  if (!/^[0-9a-f]{64}$/.test(want)) return true;
+  return sha256(buf) === want;
+}
+
 // 已汉化检测: 统计「连续 >= minRun 个 CJK 字符(U+4E00-U+9FFF)」的串。
 // 实测(2.1.190): 纯英文原版 7 处(内嵌库自带零星中文), 汉化版 >= 200 处。
 // 阈值取 50, 与任何汉化工具的产物都兼容(不依赖本工具自己的词典)。
@@ -58,12 +81,19 @@ function resolveSource(target) {
     // target 是纯英文 → 它就是源; 刷新备份(跟随升级)
     if (fs.existsSync(backupPath)) {
       const old = fs.readFileSync(backupPath);
-      if (old.equals(buf)) return { source: buf, backupPath, refreshed: false };
+      if (old.equals(buf)) {
+        try { if (!fs.existsSync(backupPath + SHA_SUFFIX)) fs.writeFileSync(backupPath + SHA_SUFFIX, sha256(old)); } catch {}
+        return { source: buf, backupPath, refreshed: false };
+      }
+      // 旧备份保留为 .prev, 作为 resolveSource 找不到可用备份时的兜底源(见下方)
       const prev = backupPath + '.prev';
-      if (fs.existsSync(prev)) fs.unlinkSync(prev);
-      fs.renameSync(backupPath, prev);
+      removeQuietly(prev, 2);
+      try {
+        fs.renameSync(backupPath, prev);
+        if (fs.existsSync(backupPath + SHA_SUFFIX)) fs.renameSync(backupPath + SHA_SUFFIX, prev + SHA_SUFFIX);
+      } catch {}
     }
-    fs.writeFileSync(backupPath, buf); // 新建文件, 自然断开 install 时的硬链接
+    writeBackup(backupPath, buf); // 新建文件, 自然断开 install 时的硬链接
     return { source: buf, backupPath, refreshed: true };
   }
 
@@ -71,22 +101,20 @@ function resolveSource(target) {
   // 必须校验备份完整(含 Bun 魔术串 + 体积下限): 若上次写备份时磁盘满而被截断,
   // 长度断言(比较的是 buf 与 source, 两者同源)照样通过, 加 --no-verify 就会把
   // 一个截断的二进制盖到 target 上, 且备份也已经是坏的 —— 只能重装。
-  if (fs.existsSync(backupPath)) {
-    if (!isClaudeBinary(backupPath)) {
-      throw new Error('备份文件不完整(可能上次写盘中断被截断), 拒绝作为补丁源: ' + backupPath +
-        '\n  请重装或升级 Claude Code 得到纯英文版本后重试。');
+  // 依次尝试: 本工具备份 → 上一轮备份(.prev) → claude-code-zh-cn 的备份
+  for (const cand of [backupPath, backupPath + '.prev', target + ZHCN_BACKUP_SUFFIX]) {
+    if (!fs.existsSync(cand)) continue;
+    if (!isClaudeBinary(cand)) continue;      // 截断/非二进制
+    const b = fs.readFileSync(cand);
+    if (!backupIntact(cand, b)) continue;     // 体积尾串都对但中段损坏
+    if (looksTranslated(b)) {
+      if (cand === backupPath) {
+        throw new Error('备份文件 ' + backupPath + ' 本身已被汉化, 不能作源。请重装/升级 Claude Code 后重试。');
+      }
+      continue;
     }
-    const b = fs.readFileSync(backupPath);
-    if (!looksTranslated(b)) return { source: b, backupPath, refreshed: false };
-    throw new Error('备份文件 ' + backupPath + ' 本身已被汉化, 不能作源。请重装/升级 Claude Code 后重试。');
-  }
-  const zhcnPath = target + ZHCN_BACKUP_SUFFIX;
-  if (fs.existsSync(zhcnPath) && isClaudeBinary(zhcnPath)) { // 同样要校验完整性, 截断的备份不能当源
-    const b = fs.readFileSync(zhcnPath);
-    if (!looksTranslated(b)) {
-      fs.writeFileSync(backupPath, b); // 收编为本工具的备份
-      return { source: b, backupPath, refreshed: true };
-    }
+    if (cand !== backupPath) writeBackup(backupPath, b); // 收编为本工具的备份
+    return { source: b, backupPath, refreshed: cand !== backupPath };
   }
   throw new Error(
     '目标已被汉化, 且找不到纯英文备份(' + backupPath + ')。\n' +
@@ -229,6 +257,42 @@ function sleepSync(ms) {
   Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
 }
 
+// 临时文件名带 pid: 此前全局共用一个 `.cchans-tmp`, 两个 cchans 并发时,
+// 后写的进程会把先写的内容顶掉, 而先写的进程照样 rename 并报告"成功" ——
+// 实测出现过「A 报成功, 落地的却是 B 的字节」(审查实证)。
+const tmpPathFor = target => target + '.cchans-tmp.' + process.pid;
+
+// 跨进程互斥: 同一个 target 同时只允许一个 cchans 改写。
+// 用 'wx' 独占创建锁文件, 零依赖且跨平台。陈旧锁(进程已死)按 mtime 超时接管。
+const LOCK_SUFFIX = '.cchans-lock';
+const LOCK_STALE_MS = 30 * 60 * 1000;
+
+function acquireLock(target) {
+  const lock = target + LOCK_SUFFIX;
+  for (let i = 0; i < 2; i++) {
+    try {
+      const fd = fs.openSync(lock, 'wx');
+      fs.writeSync(fd, String(process.pid));
+      fs.closeSync(fd);
+      return lock;
+    } catch (e) {
+      if (e.code !== 'EEXIST') return null; // 无权限等情况: 不因为锁失败而阻断主流程
+      let stale = false;
+      try { stale = Date.now() - fs.statSync(lock).mtimeMs > LOCK_STALE_MS; } catch { stale = true; }
+      if (!stale) {
+        throw new Error('另一个 cchans 正在处理同一个 claude 二进制(锁文件: ' + lock + ')。\n' +
+          '  请等它跑完再试; 若确认没有其他实例在跑, 删掉该锁文件即可。');
+      }
+      removeQuietly(lock, 1); // 陈旧锁, 接管后重试一次
+    }
+  }
+  return null;
+}
+
+function releaseLock(lock) {
+  if (lock) removeQuietly(lock, 2);
+}
+
 // Windows 上 EACCES 多半是杀软/句柄占用(瞬时, 值得重试); POSIX 上它几乎总是
 // 权限不足(root 拥有的 /usr/local/lib/node_modules 等), 重试纯属浪费且会误导用户。
 const LOCK_CODES = process.platform === 'win32'
@@ -334,7 +398,9 @@ function cleanAside(target) {
   let names = [];
   try { names = fs.readdirSync(dir); } catch { return; }
   for (const n of names) {
-    if (n.startsWith(prefix)) removeQuietly(path.join(dir, n), 1);
+    // 精确匹配, 不能用 startsWith: 否则会删掉用户自己的
+    // claude.exe.cchans-older-notes.txt 之类同前缀文件(审查实证)。
+    if (n === prefix || n.startsWith(prefix + '.')) removeQuietly(path.join(dir, n), 1);
   }
 }
 
@@ -343,7 +409,7 @@ function cleanAside(target) {
 const healInterrupted = healMissing;
 
 function atomicWrite(target, buf) {
-  const tmp = target + '.cchans-tmp';
+  const tmp = tmpPathFor(target);
   try {
     fs.writeFileSync(tmp, buf);
     inheritExecMode(tmp, target);
@@ -352,6 +418,12 @@ function atomicWrite(target, buf) {
     throw e;
   }
   return commitTmp(tmp, target);
+}
+
+// 回收本目录下所有 cchans 临时文件(自己的 pid 后缀 + 旧版无后缀的)
+function cleanTmp(target) {
+  removeQuietly(target + '.cchans-tmp', 1);
+  removeQuietly(tmpPathFor(target), 1);
 }
 
 // 运行时冒烟验证 —— 本工具最重要的安全网(2026-08-03 血的教训, 详见 §十一)。
@@ -386,10 +458,15 @@ function verifyRuntime(exePath) {
   for (const k of Object.keys(env)) {
     if (k === 'CLAUDECODE' || k.startsWith('CLAUDE_CODE_')) delete env[k];
   }
+  // Windows 上 CreateProcess 卡 MAX_PATH(260): 路径一长 spawn 就 ENOENT, 会被
+  // 误判成"补丁产物跑不起来"。加 \\?\ 前缀绕过(实测 274 字符路径由此恢复正常)。
+  const spawnPath = (process.platform === 'win32' && exePath.length > 200 && /^[a-zA-Z]:\\/.test(exePath))
+    ? '\\\\?\\' + exePath
+    : exePath;
   try {
     for (const args of SMOKE_ARGS) {
       const label = args.join(' ');
-      const r = spawnSync(exePath, args, {
+      const r = spawnSync(spawnPath, args, {
         env, encoding: 'utf8', timeout: 120000, windowsHide: true,
       });
       if (r.error) {
@@ -423,13 +500,42 @@ function resignIfDarwin(target) {
   }
 }
 
+// 开扫之前先探一次写权限: 全量扫描要 60~90 秒, 若目标目录不可写(Linux/macOS 上
+// npm 全局目录常归 root), 让用户白等一分半再吐一条裸 EACCES 是很糟的体验 ——
+// 这也是非 Windows 平台最常见的失败模式(审查实证)。
+function assertWritable(target) {
+  const probe = target + '.cchans-probe.' + process.pid;
+  try {
+    fs.writeFileSync(probe, 'x');
+  } catch (e) {
+    if (e.code === 'EACCES' || e.code === 'EPERM') {
+      throw new Error('没有写权限: ' + path.dirname(target) + ' (' + e.code + ')\n' +
+        (process.platform === 'win32'
+          ? '  请用管理员权限运行, 或把 Claude Code 装到有写权限的位置。'
+          : '  请用 sudo 运行, 或把 Claude Code 装到有写权限的位置(如 ~/.local)。'));
+    }
+    throw e;
+  }
+  removeQuietly(probe, 2);
+}
+
 function patch(target, opts = {}) {
   const healed = healInterrupted(target); // 必须在 isClaudeBinary 之前
   if (!isClaudeBinary(target)) {
     throw new Error('不是有效的 Claude Code 二进制(缺少 Bun 魔术串或体积过小): ' + target);
   }
+  assertWritable(target);
+  const lock = acquireLock(target);
+  try {
+    return patchLocked(target, opts, healed);
+  } finally {
+    releaseLock(lock);
+  }
+}
+
+function patchLocked(target, opts, healed) {
   const dict = loadDict();
-  removeQuietly(target + '.cchans-tmp', 1); // 回收上次写盘失败留下的半成品
+  cleanTmp(target); // 回收上次写盘失败留下的半成品
   // 注意顺序: cleanAside 必须在 resolveSource **之后**。让位副本可能是用户手上
   // 最后一份纯英文原版(例如备份被误删), 先删再发现没有可用源就无法挽回了
   // (2026-08-03 审查实证)。
@@ -446,7 +552,7 @@ function patch(target, opts = {}) {
   }
   // 先落临时文件 → (macOS 重签名) → 实跑验证 → 通过才 rename 覆盖 target。
   // 验证不通过时 target 保持原样, 用户环境不受任何影响。
-  const tmp = target + '.cchans-tmp';
+  const tmp = tmpPathFor(target);
   let resigned = null;
   let verified = null;
   try {
@@ -512,6 +618,10 @@ function restore(target) {
     throw new Error('备份文件不是完整的 Claude Code 二进制(可能上次写盘中断被截断), 拒绝还原: ' + backupPath);
   }
   const buf = fs.readFileSync(backupPath);
+  if (!backupIntact(backupPath, buf)) {
+    throw new Error('备份文件校验失败(sha256 与记录不符, 内容已损坏), 拒绝还原: ' + backupPath +
+      '\n  请重装 Claude Code: npm install -g @anthropic-ai/claude-code');
+  }
   if (looksTranslated(buf)) {
     throw new Error('备份文件本身已被汉化, 拒绝还原(会覆盖不掉中文)。请重装 Claude Code。');
   }
@@ -536,5 +646,6 @@ function status(target) {
 module.exports = {
   loadDict, looksTranslated, countCjkRuns, resolveSource,
   patchBuffer, atomicWrite, patch, restore, status, resignIfDarwin,
-  verifyRuntime, BACKUP_SUFFIX, DICT_PATH,
+  verifyRuntime, cleanAside, cleanTmp, backupIntact, inNativePool,
+  BACKUP_SUFFIX, DICT_PATH,
 };

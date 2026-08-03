@@ -37,7 +37,7 @@ function requireTarget() {
       try {
         const dir = require('path').dirname(pinned);
         const prefix = require('path').basename(pinned) + '.cchans-old';
-        const left = require('fs').readdirSync(dir).filter(n => n.startsWith(prefix));
+        const left = require('fs').readdirSync(dir).filter(n => n === prefix || n.startsWith(prefix + '.'));
         if (left.length) {
           extra += '\n  发现同目录存在让位副本(上次替换可能被中断):\n' +
                    left.map(n => '    ' + n).join('\n') +
@@ -65,6 +65,11 @@ try {
   switch (cmd) {
     case 'patch': {
       const { path: target } = requireTarget();
+      if (flags.has('--no-verify')) {
+        console.log('⚠ 已关闭实跑验证(--no-verify)。');
+        console.log('  这是本工具唯一能拦住"补丁把二进制改坏"的安全网 —— 关掉它意味着');
+        console.log('  一个跑不起来的 claude 可能直接盖掉你现在能用的那个。仅在明知后果时使用。');
+      }
       console.log('打补丁中(全量扫描约 1 分钟, 请稍候)…');
       const r = patcher.patch(target, {
         onProgress: progress('词条'),
@@ -72,7 +77,6 @@ try {
         onVerify: () => { endProgress(); console.log('验证中(实跑补丁产物, 约 10s)…'); },
       });
       endProgress();
-      if (r.healed) console.log('  已自愈: 检测到上次替换被中断, 已从让位副本恢复 claude 二进制。');
       console.log('✓ 完成: ' + r.keysHit + '/' + r.dictTotal + ' 词条命中, 共替换 ' + r.occurrences +
         ' 处(守卫跳过: 标识符内 ' + r.boundarySkips + ' 处 / 原生常量池 ' + r.poolSkips +
         ' 处), 耗时 ' + r.seconds.toFixed(1) + 's');
@@ -98,7 +102,6 @@ try {
     case 'restore': {
       const { path: target } = requireTarget();
       const r = patcher.restore(target);
-      if (r.healed) console.log('  已自愈: 检测到上次替换被中断, 已从让位副本恢复 claude 二进制。');
       console.log('✓ 已还原纯英文: ' + r.restoredFrom + ' -> ' + target);
       if (r.movedAside) {
         console.log('  注意: 目标正在运行, 已热替换(旧映像暂留 .cchans-old.*, 下次 patch 自动清理)。');

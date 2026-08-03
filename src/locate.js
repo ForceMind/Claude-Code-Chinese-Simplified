@@ -92,7 +92,10 @@ function healMissing(target) {
     if (fs.existsSync(target)) return false;
     const dir = path.dirname(target);
     const prefix = path.basename(target) + ASIDE_SUFFIX;
-    const names = fs.readdirSync(dir).filter(n => n.startsWith(prefix));
+    // 必须精确匹配 `<basename>.cchans-old` 或 `<basename>.cchans-old.<时间戳>`。
+    // 用 startsWith 会把用户自己的 claude.exe.cchans-older-notes.txt 也算进来 ——
+    // 这里是 rename 到 target, 等于把用户文件冒名顶替成 claude.exe(审查实证)。
+    const names = fs.readdirSync(dir).filter(n => n === prefix || n.startsWith(prefix + '.'));
     if (!names.length) return false;
     // 按 mtime 取最新(比依赖文件名里的时间戳字符串排序更稳)
     const ranked = names.map(n => {
