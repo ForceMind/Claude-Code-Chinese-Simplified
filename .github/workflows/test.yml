@@ -1,0 +1,30 @@
+name: test
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  selftest:
+    # 本项目当前只在 Windows 上验证过(macOS/Linux 分支代码存在但未经真机测试,
+    # 见 README 平台支持表), CI 先只跑 windows-latest, 跟测试覆盖的真实范围
+    # 保持一致, 不制造"通过了但没人验证过"的假象。
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: build-dict
+        run: npm run build-dict
+      - name: 校验词典构建产物未漂移(源改了要记得重建)
+        shell: bash
+        run: |
+          git diff --exit-code -- dict/zh-Hans.json dict/oversize.json || {
+            echo "::error::dict/zh-Hans.json 或 dict/oversize.json 与 dict/sources/cli-translations.json 重新构建的结果不一致 —— 改了源词典后请记得跑 npm run build-dict 并把构建产物一起提交。"
+            exit 1
+          }
+      - name: selftest
+        run: npm test

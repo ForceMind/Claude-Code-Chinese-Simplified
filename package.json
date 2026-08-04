@@ -1,6 +1,6 @@
 {
   "name": "cchans",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Claude Code 汉化工具 —— 等长原地二进制补丁, 零依赖, 永久跟随新版",
   "bin": {
     "cchans": "bin/cchans.js"
@@ -13,7 +13,8 @@
     "tools"
   ],
   "scripts": {
-    "build-dict": "node tools/build-dict.cjs"
+    "build-dict": "node tools/build-dict.cjs",
+    "test": "node test/selftest.js"
   },
   "engines": {
     "node": ">=18"
