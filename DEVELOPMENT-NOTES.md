@@ -639,3 +639,46 @@ lstat walk 的实现)遇到 `\\?\` 前缀会在盘符根上炸出 `EISDIR`, 跟�
    patcher.js 才跑测试, `realpathSync` 的 EISDIR 坑会被埋在一堆其他调用
    的噪声里, 更难定位。先写十几行脚本单独打一遍 10 个原语, 一次就抓到了
    问题, 再往上搭多层调用才安全。
+
+## 十七、2026-08-04 首次发布到 npm, 补上项目基础设施
+
+`cchans@0.2.0` 发布到 npm registry, `npx cchans` / `npm install -g cchans` 从此可用,
+不再要求 `git clone`。发布过程记两个坑:
+
+1. **账号用通行密钥(passkey/WebAuthn)而非 TOTP 验证器时, `npm publish` 直接报
+   `EOTP` 拒绝, 不会像 `npm login` 那样弹浏览器确认。** `--otp=<code>` 这条路对
+   passkey-only 账号走不通(拿不出动态码)。解法: 去 npmjs.com 建一个 Granular
+   Access Token, 权限 Read and write, 勾选 "Bypass two-factor authentication",
+   `npm config set //registry.npmjs.org/:_authToken=<token>` 后即可正常
+   `npm publish`。发布完立即 `npm config delete` 清本地配置, 并提醒用户去
+   npmjs.com 撤销该 token(令牌曾明文出现在对话记录里, 不能只信"设了过期时间"）。
+2. **发布不等于能用——必须实跑验证。** `npm pack --dry-run` 只能看包内容对不对
+   (文件齐不齐、体积对不对), 看不出 `bin` 字段/shebang/依赖解析是否真的能跑。
+   发布后额外跑了一次 `npx --yes cchans@0.2.0 status`(从真实 registry 拉包执行,
+   不是本地 `node bin/cchans.js`), 确认命令能找到用户机器上的 claude.exe 并正确
+   报告状态, 才算发布真正完成——跟本项目"验证过才算完成"的一贯要求一致, 补丁
+   引擎要实跑验证, 发布同样要实跑验证。
+
+顺带补上此前缺的项目基础设施(功能成熟度早已领先于发布配置——11 项安全机制、
+`--full` 引擎、Windows 长路径支持、37 条 selftest, 但 package.json 还停在初始
+的 0.1.0、没有 test 脚本、没有 CI):
+
+- `package.json` 加 `"test": "node test/selftest.js"`, 版本号提到 0.2.0(仍是
+  0.x, 不作"稳定公开 API"的承诺——macOS/Linux 还没真机验证过, 到 1.0.0 为时过早)。
+- `.github/workflows/test.yml`: push/PR 到 main 时跑 `npm test`。只用
+  windows-latest, 跟"当前只在 Windows 上验证过"的真实覆盖范围保持一致; 顺带在
+  selftest 前加一道 `npm run build-dict` 后 `git diff --exit-code` 校验, 防止
+  有人改了 `dict/sources/cli-translations.json` 却忘记把重新生成的
+  `dict/zh-Hans.json`/`dict/oversize.json` 一起提交。
+- `CHANGELOG.md`(面向使用者的版本摘要, 完整来龙去脉仍以本文件为准)、
+  `CONTRIBUTING.md`(把 `scan --prompt` 这个已经做好但没写进文档的贡献路径
+  显性化)、README 顶部补 npm/CI/license/node 版本徽章、`.gitignore` 补
+  `*.tgz`(防止 `npm pack` 产物被误提交)。
+
+### 包名的选择
+
+用户提议过改名成 `zh` 或 `hanhua`。查证后 `zh` 已被占用, `hanhua` 空着但对非中文
+用户不友好(纯拼音, 搜索引擎和不懂中文的人都get不到"这是 Claude Code 汉化工具"这层
+意思)。`cchans` = `cc`(Claude Code) + `hans`(ISO 15924 简体中文脚本代码, 呼应
+`dict/zh-Hans.json`), 对熟悉 i18n 惯例的人一望即知, 且早已刻进 CLI 命令名、文档、
+数十条提交记录——改名的重写成本明显大于换来的辨识度收益, 建议保留, 最终采纳。

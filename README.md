@@ -1,5 +1,10 @@
 # Claude Code 汉化工具 (cchans)
 
+[![npm version](https://img.shields.io/npm/v/cchans.svg)](https://www.npmjs.com/package/cchans)
+[![test](https://github.com/ForceMind/Claude-Code-Chinese-Simplified/actions/workflows/test.yml/badge.svg)](https://github.com/ForceMind/Claude-Code-Chinese-Simplified/actions/workflows/test.yml)
+[![license](https://img.shields.io/npm/l/cchans.svg)](LICENSE)
+[![node](https://img.shields.io/node/v/cchans.svg)](package.json)
+
 对 Claude Code 原生二进制（Bun 编译的 `claude.exe` / `claude`）做**等长原地补丁**的汉化工具。
 
 **零依赖 · 一条命令 · 跟随新版 · 随时还原**
