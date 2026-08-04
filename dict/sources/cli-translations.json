@@ -7620,5 +7620,889 @@
   {
     "en": "Denied by auto mode classifier",
     "zh": "被自动模式分类器拒绝"
+  },
+  {
+    "en": "Runtime capabilities for published Artifacts",
+    "zh": "已发布 Artifact 的运行时能力"
+  },
+  {
+    "en": "Design guidance for Artifacts",
+    "zh": "Artifact 设计指引"
+  },
+  {
+    "en": "Publish a dashboard Artifact from a template",
+    "zh": "用模板发布仪表盘 Artifact"
+  },
+  {
+    "en": "Publish a report Artifact from a template",
+    "zh": "用模板发布报告 Artifact"
+  },
+  {
+    "en": "Publish a data-table Artifact from a template",
+    "zh": "用模板发布数据表 Artifact"
+  },
+  {
+    "en": "Publish an explainer Artifact from a template",
+    "zh": "用模板发布讲解页 Artifact"
+  },
+  {
+    "en": "Review the current diff for bugs and cleanups",
+    "zh": "审查当前 diff 的问题与清理项"
+  },
+  {
+    "en": "Generate an interactive walkthrough artifact for code",
+    "zh": "为代码生成交互式讲解 Artifact"
+  },
+  {
+    "en": "Chart and dashboard design guidance",
+    "zh": "图表与仪表盘设计指引"
+  },
+  {
+    "en": "Work with Claude Design (claude.ai/design) \\u2014 create, import, export, sync, login",
+    "zh": "操作 Claude Design(claude.ai/design)——创建/导入/导出/同步/登录"
+  },
+  {
+    "en": "Health-check your setup and fix issues: installation, unused extensions, duplicated or bloated memory files, slow hooks, updates, permissions",
+    "zh": "体检并修复配置问题：安装、闲置扩展、重复或臃肿的记忆文件、慢 hook、更新、权限"
+  },
+  {
+    "en": "See where this session\\u2019s tokens went, in plain words",
+    "zh": "用大白话看本会话的 token 花在了哪"
+  },
+  {
+    "en": "Publish a plan as a shareable Artifact",
+    "zh": "把计划发布为可分享 Artifact"
+  },
+  {
+    "en": "Sketch on a whiteboard Artifact you can send to Claude",
+    "zh": "在白板 Artifact 上画草图并发给 Claude"
+  },
+  {
+    "en": "Workshop a document through artifact decisions",
+    "zh": "通过 Artifact 决策打磨文档"
+  },
+  {
+    "en": "Generate a shareable walkthrough artifact for a PR",
+    "zh": "为 PR 生成可分享的讲解 Artifact"
+  },
+  {
+    "en": "Publish a PR review briefing Artifact from a template",
+    "zh": "用模板发布 PR 审查简报 Artifact"
+  },
+  {
+    "en": "Guided setup \\u2014 pick a role, install a plugin, try a skill, connect tools",
+    "zh": "引导式设置——选角色、装插件、试技能、连工具"
+  },
+  {
+    "en": "Answer questions about Claude Code features and settings",
+    "zh": "解答 Claude Code 功能与设置问题"
+  },
+  {
+    "en": "<optional custom summarization instructions>",
+    "zh": "<可选的自定义摘要说明>"
+  },
+  {
+    "en": "[conversation id or search term]",
+    "zh": "[会话 ID 或搜索词]"
+  },
+  {
+    "en": "[pr number]",
+    "zh": "[PR 编号]"
+  },
+  {
+    "en": "[issue description]",
+    "zh": "[问题描述]"
+  },
+  {
+    "en": "[pr number or url]",
+    "zh": "[PR 号或链接]"
+  },
+  {
+    "en": "Search artifacts\\u2026",
+    "zh": "搜索 Artifact…"
+  },
+  {
+    "en": "Search settings\\u2026",
+    "zh": "搜索设置…"
+  },
+  {
+    "en": "Search skills\\u2026",
+    "zh": "搜索技能…"
+  },
+  {
+    "en": "Filter color tokens\\u2026",
+    "zh": "筛选颜色 token…"
+  },
+  {
+    "en": "add context (optional)",
+    "zh": "加上下文(可选)"
+  },
+  {
+    "en": "Type something\\u2026",
+    "zh": "输入点什么…"
+  },
+  {
+    "en": "Filter history\\u2026",
+    "zh": "筛选历史…"
+  },
+  {
+    "en": "Tell Claude what to change",
+    "zh": "告诉 Claude 要改什么"
+  },
+  {
+    "en": "Add notes on this design\\u2026",
+    "zh": "给这个设计加备注…"
+  },
+  {
+    "en": "command prefix (e.g., npm run *)",
+    "zh": "命令前缀(如 npm run *)"
+  },
+  {
+    "en": "command prefix (e.g., Get-Process *)",
+    "zh": "命令前缀(如 Get-Process *)"
+  },
+  {
+    "en": "Enter a repo as owner/repo or https://github.com/owner/repo\\u2026",
+    "zh": "输入仓库 owner/repo 或 GitHub 链接…"
+  },
+  {
+    "en": "Current session",
+    "zh": "当前会话"
+  },
+  {
+    "en": "Current week (all models)",
+    "zh": "本周(全部模型)"
+  },
+  {
+    "en": "Current week (Sonnet only)",
+    "zh": "本周(仅 Sonnet)"
+  },
+  {
+    "en": "MCP config diagnostics",
+    "zh": "MCP 配置诊断"
+  },
+  {
+    "en": "Confirm and save",
+    "zh": "确认并保存"
+  },
+  {
+    "en": "Pin model versions",
+    "zh": "锁定模型版本"
+  },
+  {
+    "en": "Set up Amazon Bedrock",
+    "zh": "设置 Amazon Bedrock"
+  },
+  {
+    "en": "How do you authenticate to Google Cloud?",
+    "zh": "你如何认证 Google Cloud？"
+  },
+  {
+    "en": "GCP project ID",
+    "zh": "GCP 项目 ID"
+  },
+  {
+    "en": "Vertex AI region",
+    "zh": "Vertex AI 区域"
+  },
+  {
+    "en": "Service account key",
+    "zh": "服务账号密钥"
+  },
+  {
+    "en": "Set up Google Vertex AI",
+    "zh": "设置 Google Vertex AI"
+  },
+  {
+    "en": "Pick which to remove",
+    "zh": "选择要移除的"
+  },
+  {
+    "en": "Auto-compact window",
+    "zh": "自动压缩窗口"
+  },
+  {
+    "en": "Before you start",
+    "zh": "开始之前"
+  },
+  {
+    "en": "Submit feedback / bug report",
+    "zh": "提交反馈 / Bug 报告"
+  },
+  {
+    "en": "Feedback drafts",
+    "zh": "反馈草稿"
+  },
+  {
+    "en": "This session",
+    "zh": "本次会话"
+  },
+  {
+    "en": "Other sessions",
+    "zh": "其他会话"
+  },
+  {
+    "en": "Moving to a new directory:",
+    "zh": "切换到新目录："
+  },
+  {
+    "en": "Switch to Stable Channel",
+    "zh": "切换到稳定频道"
+  },
+  {
+    "en": "Enable Auto-Updates",
+    "zh": "启用自动更新"
+  },
+  {
+    "en": "Your next response will be slower and use more tokens",
+    "zh": "下一条响应会更慢并消耗更多 token"
+  },
+  {
+    "en": "Background this session?",
+    "zh": "本会话转后台？"
+  },
+  {
+    "en": "Exiting worktree session",
+    "zh": "退出 worktree 会话"
+  },
+  {
+    "en": "Export conversation",
+    "zh": "导出对话"
+  },
+  {
+    "en": "Select export method",
+    "zh": "选择导出方式"
+  },
+  {
+    "en": "Tips for getting started",
+    "zh": "入门小贴士"
+  },
+  {
+    "en": "Request usage credits from your admin",
+    "zh": "向管理员申请用量额度"
+  },
+  {
+    "en": "Usage credits",
+    "zh": "用量额度"
+  },
+  {
+    "en": "Turn on usage credits",
+    "zh": "开启用量额度"
+  },
+  {
+    "en": "Buy usage credits",
+    "zh": "买用量额度"
+  },
+  {
+    "en": "Confirm amount",
+    "zh": "确认金额"
+  },
+  {
+    "en": "Browse default commands",
+    "zh": "浏览默认命令"
+  },
+  {
+    "en": "Custom commands",
+    "zh": "自定义命令"
+  },
+  {
+    "en": "Browse custom commands",
+    "zh": "浏览自定义命令"
+  },
+  {
+    "en": "You can also configure this in /config",
+    "zh": "也可以在 /config 里配置此项"
+  },
+  {
+    "en": "Select IDE to install extension",
+    "zh": "选择要安装扩展的 IDE"
+  },
+  {
+    "en": "Import to Claude Code",
+    "zh": "导入 Claude Code"
+  },
+  {
+    "en": "Choose API key",
+    "zh": "选 API 密钥"
+  },
+  {
+    "en": "Setup API key secret",
+    "zh": "设置密钥 Secret"
+  },
+  {
+    "en": "Set up GitHub Actions",
+    "zh": "设置 GitHub Actions"
+  },
+  {
+    "en": "GitHub CLI not found",
+    "zh": "未找到 GitHub CLI"
+  },
+  {
+    "en": "GitHub CLI not authenticated",
+    "zh": "GitHub CLI 未认证"
+  },
+  {
+    "en": "Invalid GitHub URL format",
+    "zh": "GitHub 链接格式无效"
+  },
+  {
+    "en": "Repository format warning",
+    "zh": "仓库格式警告"
+  },
+  {
+    "en": "Repository not found",
+    "zh": "未找到仓库"
+  },
+  {
+    "en": "Admin permissions required",
+    "zh": "需要管理员权限"
+  },
+  {
+    "en": "Recently denied",
+    "zh": "最近被拒"
+  },
+  {
+    "en": "Talk to your codebase",
+    "zh": "与代码库对话"
+  },
+  {
+    "en": "Steer with modes",
+    "zh": "用模式掌舵"
+  },
+  {
+    "en": "Undo anything",
+    "zh": "随时撤销"
+  },
+  {
+    "en": "Run in the background",
+    "zh": "在后台运行"
+  },
+  {
+    "en": "Teach Claude your rules",
+    "zh": "教 Claude 你的规则"
+  },
+  {
+    "en": "Extend with tools",
+    "zh": "用工具扩展"
+  },
+  {
+    "en": "Automate your workflow",
+    "zh": "自动化工作流"
+  },
+  {
+    "en": "Multiply yourself",
+    "zh": "分身并行"
+  },
+  {
+    "en": "Code from anywhere",
+    "zh": "随处编码"
+  },
+  {
+    "en": "Dial the model",
+    "zh": "调配模型"
+  },
+  {
+    "en": "Data privacy",
+    "zh": "数据隐私"
+  },
+  {
+    "en": "Cloud session details",
+    "zh": "云端会话详情"
+  },
+  {
+    "en": "Working directory has changes",
+    "zh": "工作目录有改动"
+  },
+  {
+    "en": "Fullscreen feedback",
+    "zh": "全屏模式反馈"
+  },
+  {
+    "en": "Run ultraplan in the cloud?",
+    "zh": "在云端跑 ultraplan？"
+  },
+  {
+    "en": "Remove server?",
+    "zh": "删除 server?"
+  },
+  {
+    "en": "Trust this directory?",
+    "zh": "信任此目录？"
+  },
+  {
+    "en": "New Remote Control server",
+    "zh": "新远程控制服务器"
+  },
+  {
+    "en": "Make a directory available on claude.ai/code and the Claude mobile app",
+    "zh": "把目录开放给 claude.ai/code 和 Claude 手机 App"
+  },
+  {
+    "en": "Remove task?",
+    "zh": "移除任务"
+  },
+  {
+    "en": "Fire a prompt on a recurring schedule",
+    "zh": "按周期重复执行一条提示词"
+  },
+  {
+    "en": "Claude daemon",
+    "zh": "Claude 守护"
+  },
+  {
+    "en": "Set up auto mode for your environment?",
+    "zh": "为你的环境设置自动模式？"
+  },
+  {
+    "en": "Setting up Claude in Chrome",
+    "zh": "设置 Chrome 版 Claude"
+  },
+  {
+    "en": "Claude wants to use your browser",
+    "zh": "Claude 想使用你的浏览器"
+  },
+  {
+    "en": "Session paused",
+    "zh": "会话暂停"
+  },
+  {
+    "en": "Memories recalled this session",
+    "zh": "本会话唤醒的记忆"
+  },
+  {
+    "en": "LSP plugin recommendation",
+    "zh": "LSP 插件推荐"
+  },
+  {
+    "en": "Plugin recommendation",
+    "zh": "插件推荐"
+  },
+  {
+    "en": "Try the new fullscreen renderer?",
+    "zh": "试试新的全屏渲染器？"
+  },
+  {
+    "en": "Make auto mode your default permission mode?",
+    "zh": "把自动模式设为默认权限模式？"
+  },
+  {
+    "en": "Detected a custom API key in your environment",
+    "zh": "检测到环境里有自定义 API 密钥"
+  },
+  {
+    "en": "Claude in Chrome extension detected",
+    "zh": "检测到 Chrome 版 Claude 扩展"
+  },
+  {
+    "en": "Configuration error",
+    "zh": "配置错误"
+  },
+  {
+    "en": "Review rules that skip checks",
+    "zh": "审查跳过检查的规则"
+  },
+  {
+    "en": "Review proposed auto-mode setup",
+    "zh": "审查自动模式设置建议"
+  },
+  {
+    "en": "You already have auto-mode entries \\u2014 add to them, or start fresh?",
+    "zh": "已有自动模式条目——追加还是重来？"
+  },
+  {
+    "en": "then drafting a proposal \\u2014 this can take a moment (Esc to cancel)",
+    "zh": "随后起草提案——可能要等一会(Esc 取消)"
+  },
+  {
+    "en": "How would you describe the code you work on with Claude?",
+    "zh": "你和 Claude 处理的代码属于哪类？"
+  },
+  {
+    "en": "Set this up for all your projects, or just this one?",
+    "zh": "应用到所有项目，还是只这一个？"
+  },
+  {
+    "en": "Claude Code and Cowork credit",
+    "zh": "Claude Code 与 Cowork 额度"
+  },
+  {
+    "en": "Hook configuration \\xB7 disabled",
+    "zh": "Hook 配置 · 已禁用"
+  },
+  {
+    "en": "memory index",
+    "zh": "记忆索引"
+  },
+  {
+    "en": "Claude-drafted feedback",
+    "zh": "Claude 起草的反馈"
+  },
+  {
+    "en": "Session recap",
+    "zh": "会话回顾"
+  },
+  {
+    "en": "Synced project memory (this directory; applies next session)",
+    "zh": "已同步的项目记忆(本目录，下次会话生效)"
+  },
+  {
+    "en": "Ultracode keyword trigger",
+    "zh": "Ultracode 关键词触发"
+  },
+  {
+    "en": "Dynamic workflow size",
+    "zh": "动态工作流规模"
+  },
+  {
+    "en": "Precompute compaction",
+    "zh": "预计算压缩"
+  },
+  {
+    "en": "Show message timestamps",
+    "zh": "显示消息时间戳"
+  },
+  {
+    "en": "Worktree base ref",
+    "zh": "Worktree 基线"
+  },
+  {
+    "en": "Skip the /copy picker",
+    "zh": "跳过 /copy 选择"
+  },
+  {
+    "en": "Open agents view by default",
+    "zh": "默认打开 Agent 视图"
+  },
+  {
+    "en": "Local notifications",
+    "zh": "本地通知"
+  },
+  {
+    "en": "Push when actions required",
+    "zh": "需要操作时推送"
+  },
+  {
+    "en": "Push when Claude decides",
+    "zh": "由 Claude 决定推送"
+  },
+  {
+    "en": "Question auto-continue timeout",
+    "zh": "提问自动继续超时"
+  },
+  {
+    "en": "Use custom API key: ",
+    "zh": "用自定义密钥: "
+  },
+  {
+    "en": "Codex user-scope config",
+    "zh": "Codex 用户级配置"
+  },
+  {
+    "en": "Gemini user-scope config",
+    "zh": "Gemini 用户级配置"
+  },
+  {
+    "en": "scheduled task",
+    "zh": "定时任务"
+  },
+  {
+    "en": "/rc failed",
+    "zh": "/rc 失败"
+  },
+  {
+    "en": "/rc reconnecting",
+    "zh": "/rc 重连中"
+  },
+  {
+    "en": "/rc active",
+    "zh": "/rc 已连"
+  },
+  {
+    "en": "/rc connecting\\u2026",
+    "zh": "/rc 连接中…"
+  },
+  {
+    "en": "Use this and all future MCP servers in this project",
+    "zh": "在本项目使用此及未来所有 MCP 服务器"
+  },
+  {
+    "en": "Session token",
+    "zh": "会话令牌"
+  },
+  {
+    "en": "Pin the working models with 1M context",
+    "zh": "锁定可用的 1M 上下文模型"
+  },
+  {
+    "en": "Choose different models\\u2026",
+    "zh": "选择其他模型…"
+  },
+  {
+    "en": "Skip \\u2014 use Claude Code defaults (auto-updates)",
+    "zh": "跳过——用 Claude Code 默认(自动更新)"
+  },
+  {
+    "en": "Type a different name\\u2026",
+    "zh": "输入其他名称…"
+  },
+  {
+    "en": "Connecting to gateway\\u2026",
+    "zh": "正在连接网关…"
+  },
+  {
+    "en": "Application Default Credentials (gcloud auth)",
+    "zh": "应用默认凭证(gcloud auth)"
+  },
+  {
+    "en": "Service account key file",
+    "zh": "服务账号密钥文件"
+  },
+  {
+    "en": "Type a different project\\u2026",
+    "zh": "输入其他项目…"
+  },
+  {
+    "en": "no Anthropic credentials",
+    "zh": "没有 Anthropic 凭证"
+  },
+  {
+    "en": "Remove them all",
+    "zh": "全部移除"
+  },
+  {
+    "en": "Allow carve-outs",
+    "zh": "允许豁免项"
+  },
+  {
+    "en": "Extra soft blocks",
+    "zh": "额外软拦截"
+  },
+  {
+    "en": "Extra hard blocks",
+    "zh": "额外硬拦截"
+  },
+  {
+    "en": "Looks good \\u2014 save it",
+    "zh": "没问题——保存"
+  },
+  {
+    "en": "Discard and exit",
+    "zh": "丢弃并退出"
+  },
+  {
+    "en": "Add to them (keeps your existing entries)",
+    "zh": "追加(保留你现有的条目)"
+  },
+  {
+    "en": "Start fresh (replaces the environment section)",
+    "zh": "重新开始(替换环境配置段)"
+  },
+  {
+    "en": "Personal / hobby projects",
+    "zh": "个人 / 业余项目"
+  },
+  {
+    "en": "Open-source (public repos \\u2014 pushes publish)",
+    "zh": "开源(公开仓库——推送即发布)"
+  },
+  {
+    "en": "Work / enterprise (private repos, sensitive data)",
+    "zh": "工作/企业(私有仓库、敏感数据)"
+  },
+  {
+    "en": "Mixed \\u2014 depends on the project",
+    "zh": "混合——看具体项目"
+  },
+  {
+    "en": "Just shell history",
+    "zh": "仅 shell 历史"
+  },
+  {
+    "en": "Just other checkouts",
+    "zh": "仅其他检出"
+  },
+  {
+    "en": "No, just here",
+    "zh": "只在这里"
+  },
+  {
+    "en": "This session only",
+    "zh": "仅本次会话"
+  },
+  {
+    "en": "This session + the last 24 hours",
+    "zh": "本会话 + 过去 24 小时"
+  },
+  {
+    "en": "This session + the last 7 days",
+    "zh": "本会话 + 过去 7 天"
+  },
+  {
+    "en": "Select browser\\u2026",
+    "zh": "选择浏览器…"
+  },
+  {
+    "en": "Bedrock service tier",
+    "zh": "Bedrock 服务层级"
+  },
+  {
+    "en": "GCP location",
+    "zh": "GCP 位置"
+  },
+  {
+    "en": "Gateway URL",
+    "zh": "网关 URL"
+  },
+  {
+    "en": "tmux session",
+    "zh": "tmux 会话"
+  },
+  {
+    "en": "Auto (match terminal)",
+    "zh": "自动(跟随终端)"
+  },
+  {
+    "en": "New custom theme\\u2026",
+    "zh": "新自定义主题…"
+  },
+  {
+    "en": "Notify when Claude needs you",
+    "zh": "Claude 需要你时通知"
+  },
+  {
+    "en": "Notify when Claude is done",
+    "zh": "Claude 完成时通知"
+  },
+  {
+    "en": "Exit anyway",
+    "zh": "仍退出"
+  },
+  {
+    "en": "Move to background and exit",
+    "zh": "转入后台并退出"
+  },
+  {
+    "en": "Keep worktree, end tmux session",
+    "zh": "保留 worktree 并退出 tmux"
+  },
+  {
+    "en": "Continue with usage credits",
+    "zh": "用用量额度继续"
+  },
+  {
+    "en": "Adjust monthly limit",
+    "zh": "调整每月上限"
+  },
+  {
+    "en": "Custom amount\\u2026",
+    "zh": "自定义金额…"
+  },
+  {
+    "en": "Subtotal after discount",
+    "zh": "折后小计"
+  },
+  {
+    "en": "@Claude Code - Tag @claude in issues and PR comments",
+    "zh": "@Claude Code - 在 issue 和 PR 评论里 @claude"
+  },
+  {
+    "en": "Exit without making changes",
+    "zh": "不做修改直接退出"
+  },
+  {
+    "en": "Set up GitHub Actions workflows",
+    "zh": "设置 GitHub Actions 工作流"
+  },
+  {
+    "en": "Skip for now (you can run /install-github-app again later)",
+    "zh": "暂时跳过(以后可再跑 /install-github-app)"
+  },
+  {
+    "en": "Active agent MCPs",
+    "zh": "活跃 Agent MCP"
+  },
+  {
+    "en": "Upgrade to Max",
+    "zh": "升级到 Max"
+  },
+  {
+    "en": "Add funds to continue with usage credits",
+    "zh": "充值以继续使用用量额度"
+  },
+  {
+    "en": "Wait for limit to reset",
+    "zh": "等待限额重置"
+  },
+  {
+    "en": "Enable Remote Control",
+    "zh": "启用远程控制"
+  },
+  {
+    "en": "Sandbox BashTool, with auto-allow",
+    "zh": "沙盒运行 Bash，自动放行"
+  },
+  {
+    "en": "Open in Claude Code on the web",
+    "zh": "网页版 Claude Code 打开"
+  },
+  {
+    "en": "Cloud agents",
+    "zh": "云端 Agent"
+  },
+  {
+    "en": "Set it up",
+    "zh": "去设置"
+  },
+  {
+    "en": "Don't show again",
+    "zh": "不再显示"
+  },
+  {
+    "en": "Summarize up to here",
+    "zh": "总结到这里"
+  },
+  {
+    "en": "Review plan as artifact",
+    "zh": "用 Artifact 看计划"
+  },
+  {
+    "en": "Open System Settings \\u2192 Accessibility",
+    "zh": "打开系统设置 → 辅助功能"
+  },
+  {
+    "en": "Open System Settings \\u2192 Screen Recording",
+    "zh": "打开系统设置 → 录屏"
+  },
+  {
+    "en": "Yes, and don\\u2019t ask again for",
+    "zh": "是，接下来不再问"
+  },
+  {
+    "en": "Continue with browser tools",
+    "zh": "带浏览器工具继续"
+  },
+  {
+    "en": "Keep waiting",
+    "zh": "继续等待"
+  },
+  {
+    "en": "Continue without browser tools",
+    "zh": "不用浏览器工具继续"
+  },
+  {
+    "en": "Install extension",
+    "zh": "安装扩展"
+  },
+  {
+    "en": "Disable all LSP recommendations",
+    "zh": "禁用所有 LSP 推荐"
+  },
+  {
+    "en": "Yes, set auto mode as my default permission mode",
+    "zh": "是，把自动模式设为默认权限模式"
+  },
+  {
+    "en": "Delete this and all remaining",
+    "zh": "删除此项及剩余全部"
   }
 ]
