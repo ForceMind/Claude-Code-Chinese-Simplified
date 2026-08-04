@@ -5837,7 +5837,7 @@
   },
   {
     "en": "accept edits on",
-    "zh": "自动接受编辑"
+    "zh": "自动接受编辑已开启"
   },
   {
     "en": "active agent",
@@ -5879,7 +5879,7 @@
   },
   {
     "en": "auto mode on",
-    "zh": "自动模式"
+    "zh": "自动模式已开启"
   },
   {
     "en": "built-in (macOS)",
@@ -6051,7 +6051,7 @@
   },
   {
     "en": "plan mode on",
-    "zh": "计划模式"
+    "zh": "计划模式已开启"
   },
   {
     "en": "plugin - Manage installed plugins",
