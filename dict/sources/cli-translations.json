@@ -32,10 +32,6 @@
     "zh": " 接受  "
   },
   {
-    "en": " Cancel",
-    "zh": " 取消"
-  },
-  {
     "en": " Decline",
     "zh": " 拒绝"
   },
@@ -3086,10 +3082,6 @@
     "zh": "没有可用的远程环境。"
   },
   {
-    "en": "No response",
-    "zh": "无响应"
-  },
-  {
     "en": "No response.",
     "zh": "无响应。"
   },
@@ -3398,10 +3390,6 @@
   {
     "en": "Pending response rejected since connection got disposed",
     "zh": "待处理响应被拒绝，因为连接已被释放"
-  },
-  {
-    "en": "Permission mode",
-    "zh": "权限模式"
   },
   {
     "en": "Permission request sent to team ",
@@ -3834,10 +3822,6 @@
   {
     "en": "Remote agents",
     "zh": "远程 Agent"
-  },
-  {
-    "en": "Remote session",
-    "zh": "远程会话"
   },
   {
     "en": "Remote task",
@@ -6162,10 +6146,6 @@
     "zh": "撤销"
   },
   {
-    "en": "to view",
-    "zh": "查看"
-  },
-  {
     "en": "toggle branch",
     "zh": "切换分支"
   },
@@ -7226,10 +7206,6 @@
     "zh": "调整"
   },
   {
-    "en": "to confirm",
-    "zh": "确认"
-  },
-  {
     "en": "Usage: /effort [low|medium|high|xhigh|max${...}|auto] Effort levels: - low: Quick, straightforward implementation - medium: Balanced approach with standard testing - high: Comprehensive implementation with extensive testing - xhigh: Extended reasoning with thorough analysis (${...}) - max: Maximum capability with deepest reasoning (${...})",
     "zh": "用法：/effort [low|medium|high|xhigh|max${...}|auto] 思考强度： - low：快速、直接的实现 - medium：均衡处理，包含常规测试 - high：更完整的实现和充分测试 - xhigh：扩展推理，做更彻底的分析（${...}） - max：最大能力，进行最深度推理（${...}）"
   },
@@ -7814,10 +7790,6 @@
     "zh": "选择要移除的"
   },
   {
-    "en": "Auto-compact window",
-    "zh": "自动压缩窗口"
-  },
-  {
     "en": "Before you start",
     "zh": "开始之前"
   },
@@ -7996,10 +7968,6 @@
   {
     "en": "Data privacy",
     "zh": "数据隐私"
-  },
-  {
-    "en": "Cloud session details",
-    "zh": "云端会话详情"
   },
   {
     "en": "Working directory has changes",
