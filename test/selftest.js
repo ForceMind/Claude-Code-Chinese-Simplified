@@ -390,6 +390,47 @@ test('比较谓词守卫: case 无空格/=== 贴身/接收者位置(2026-08-04 �
     else assert.strictEqual(r.occurrences, 1, code);
   }
 });
+// ── Windows 长路径(2026-08-04 新增) ──────────────────────────────────────
+test('toLongPath: 加 \\\\?\\ 前缀且不重复加, 非 win32 原样返回', () => {
+  const { toLongPath } = require('../src/winpath');
+  if (process.platform !== 'win32') {
+    assert.strictEqual(toLongPath('C:/a/b'), 'C:/a/b');
+    return;
+  }
+  const p = toLongPath('C:/a/b/c');
+  assert.ok(p.startsWith('\\\\?\\'), '应加扩展路径前缀: ' + p);
+  assert.ok(!p.includes('/'), '应转换成反斜杠: ' + p);
+  assert.strictEqual(toLongPath(p), p, '已带前缀的路径不应重复加前缀');
+});
+
+test('lockIsStale: pid 存活即不陈旧, 不受锁放了多久影响(2026-08-04 两轮审查定案)', () => {
+  // 故意不引入"放了 N 分钟就无条件允许接管"的时间兜底 —— 审查实测过这会让
+  // 第二个进程在第一个进程只是因杀软扫描/网络卡顿跑得比平时慢时抢走活锁,
+  // 造成两进程并发写同一个 253MB 二进制。哪怕锁"放"了很久, 只要 pid 还活
+  // 着就必须尊重它。用很旧的 mtime + 自己的 pid(保证存活)验证这一点。
+  const dir = scratchDir('lock-fresh');
+  const lock = path.join(dir, 'fake.lock');
+  fs.writeFileSync(lock, String(process.pid));
+  const veryOld = (Date.now() - 6 * 3600 * 1000) / 1000;
+  fs.utimesSync(lock, veryOld, veryOld);
+  assert.strictEqual(patcher.pidAlive(process.pid), true, '前提: 自己的 pid 必须判定为存活');
+  assert.strictEqual(patcher.lockIsStale(lock), false, '哪怕 mtime 很旧, pid 存活就不能判陈旧');
+});
+
+test('lockIsStale: pid 已死或锁文件内容无法解析 -> 立即陈旧', () => {
+  const dir = scratchDir('lock-dead');
+  // 找一个几乎不可能存活的 pid(实测环境里的进程号量级远小于此)
+  const deadPid = 999999;
+  assert.strictEqual(patcher.pidAlive(deadPid), false, '前提: 这个 pid 不应存活');
+  const lock1 = path.join(dir, 'dead.lock');
+  fs.writeFileSync(lock1, String(deadPid));
+  assert.strictEqual(patcher.lockIsStale(lock1), true, 'pid 已死应立即可接管');
+
+  const lock2 = path.join(dir, 'garbage.lock');
+  fs.writeFileSync(lock2, 'not-a-pid');
+  assert.strictEqual(patcher.lockIsStale(lock2), true, '锁内容无法解析成 pid 也应视为陈旧');
+});
+
 // ── 汇总 ────────────────────────────────────────────────────────────────
 try { fs.rmSync(tmpRoot, { recursive: true, force: true }); } catch {}
 

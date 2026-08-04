@@ -12,6 +12,7 @@
 // target 是纯英文(新装或刚升级) → 刷新备份; 已汉化 → 用现有备份作源。
 
 const fs = require('fs');
+const wfs = require('./wfs'); // 长路径安全的 fs 子集(见 src/winpath.js 注释)
 const os = require('os');
 const path = require('path');
 const { execFileSync, spawnSync } = require('child_process');
@@ -24,7 +25,7 @@ const BACKUP_SUFFIX = '.cchans-backup';
 const ZHCN_BACKUP_SUFFIX = '.zh-cn-backup'; // 兼容收编 claude-code-zh-cn 留下的备份
 
 function loadDict() {
-  return JSON.parse(fs.readFileSync(DICT_PATH, 'utf8'));
+  return JSON.parse(wfs.readFileSync(DICT_PATH, 'utf8'));
 }
 
 // 备份完整性锚。isClaudeBinary 只查体积 + 尾部魔术串, 拦得住"被截断", 拦不住
@@ -38,14 +39,14 @@ function sha256(buf) {
 }
 
 function writeBackup(backupPath, buf) {
-  fs.writeFileSync(backupPath, buf);
-  try { fs.writeFileSync(backupPath + SHA_SUFFIX, sha256(buf)); } catch {}
+  wfs.writeFileSync(backupPath, buf);
+  try { wfs.writeFileSync(backupPath + SHA_SUFFIX, sha256(buf)); } catch {}
 }
 
 // 返回 true=校验通过或无锚可校验; false=锚存在且对不上(备份已损坏)
 function backupIntact(backupPath, buf) {
   let want;
-  try { want = fs.readFileSync(backupPath + SHA_SUFFIX, 'utf8').trim(); } catch { return true; }
+  try { want = wfs.readFileSync(backupPath + SHA_SUFFIX, 'utf8').trim(); } catch { return true; }
   if (!/^[0-9a-f]{64}$/.test(want)) return true;
   return sha256(buf) === want;
 }
@@ -78,22 +79,22 @@ function looksTranslated(buf) {
 // 误判防护: 覆盖旧备份前先字节比对, 不同则把旧备份保留为 .prev 而不是直接丢弃。
 function resolveSource(target) {
   const backupPath = target + BACKUP_SUFFIX;
-  const buf = fs.readFileSync(target);
+  const buf = wfs.readFileSync(target);
 
   if (!looksTranslated(buf)) {
     // target 是纯英文 → 它就是源; 刷新备份(跟随升级)
-    if (fs.existsSync(backupPath)) {
-      const old = fs.readFileSync(backupPath);
+    if (wfs.existsSync(backupPath)) {
+      const old = wfs.readFileSync(backupPath);
       if (old.equals(buf)) {
-        try { if (!fs.existsSync(backupPath + SHA_SUFFIX)) fs.writeFileSync(backupPath + SHA_SUFFIX, sha256(old)); } catch {}
+        try { if (!wfs.existsSync(backupPath + SHA_SUFFIX)) wfs.writeFileSync(backupPath + SHA_SUFFIX, sha256(old)); } catch {}
         return { source: buf, backupPath, refreshed: false };
       }
       // 旧备份保留为 .prev, 作为 resolveSource 找不到可用备份时的兜底源(见下方)
       const prev = backupPath + '.prev';
       removeQuietly(prev, 2);
       try {
-        fs.renameSync(backupPath, prev);
-        if (fs.existsSync(backupPath + SHA_SUFFIX)) fs.renameSync(backupPath + SHA_SUFFIX, prev + SHA_SUFFIX);
+        wfs.renameSync(backupPath, prev);
+        if (wfs.existsSync(backupPath + SHA_SUFFIX)) wfs.renameSync(backupPath + SHA_SUFFIX, prev + SHA_SUFFIX);
       } catch {}
     }
     writeBackup(backupPath, buf); // 新建文件, 自然断开 install 时的硬链接
@@ -115,8 +116,8 @@ function resolveSource(target) {
   const targetSize = buf.length;
   const wantVer = readVersion(target);
   for (const cand of [backupPath, target + ZHCN_BACKUP_SUFFIX]) {
-    if (!fs.existsSync(cand) || !isClaudeBinary(cand)) continue; // 截断/非二进制
-    const b = fs.readFileSync(cand);
+    if (!wfs.existsSync(cand) || !isClaudeBinary(cand)) continue; // 截断/非二进制
+    const b = wfs.readFileSync(cand);
     if (!backupIntact(cand, b)) continue;     // 体积尾串都对但中段损坏
     if (looksTranslated(b)) {
       if (cand === backupPath) {
@@ -138,7 +139,7 @@ function resolveSource(target) {
     return { source: b, backupPath, refreshed: cand !== backupPath, sourceFrom: cand };
   }
   const prev = backupPath + '.prev';
-  const prevHint = fs.existsSync(prev)
+  const prevHint = wfs.existsSync(prev)
     ? '\n  同目录存在上一版本的备份 ' + prev + '\n' +
       '  它很可能是**旧版本**的字节, 本工具不会自动使用(会把你的 claude 静默降级)。\n' +
       '  确认版本无误后可手动改名为 ' + path.basename(backupPath) + ' 再重试。'
@@ -552,7 +553,7 @@ function rewriteRegion(region, safeDict, overDict, onProgress) {
 
 function loadOversize() {
   const p = path.join(ROOT, 'dict', 'oversize.json');
-  try { return JSON.parse(fs.readFileSync(p, 'utf8')); } catch { return {}; }
+  try { return JSON.parse(wfs.readFileSync(p, 'utf8')); } catch { return {}; }
 }
 
 // 同目录写临时文件再 rename(同盘保证原子性); rename 覆盖会让 target 指向新
@@ -569,9 +570,8 @@ function sleepSync(ms) {
 const tmpPathFor = target => target + '.cchans-tmp.' + process.pid;
 
 // 跨进程互斥: 同一个 target 同时只允许一个 cchans 改写。
-// 用 'wx' 独占创建锁文件, 零依赖且跨平台。陈旧锁(进程已死)按 mtime 超时接管。
+// 用 'wx' 独占创建锁文件, 零依赖且跨平台。陈旧锁(进程已死)立即可接管。
 const LOCK_SUFFIX = '.cchans-lock';
-const LOCK_STALE_MS = 30 * 60 * 1000;
 
 // 判断锁文件记录的 pid 是否还活着。signal 0 只做权限/存在性探测, 不真的发信号。
 // ESRCH = 进程不存在; EPERM = 存在但不属于当前用户(视为活着, 保守)。
@@ -580,22 +580,26 @@ function pidAlive(pid) {
   try { process.kill(pid, 0); return true; } catch (e) { return e.code !== 'ESRCH'; }
 }
 
+// 2026-08-04 教训(两轮独立审查复现): 曾经尝试给这里加一条"mtime 超过
+// 30 分钟就无条件允许接管, 不管 pid 是否存活"的兜底, 想解决"锁文件里的 pid
+// 被系统复用给另一个无关存活进程, 导致陈旧锁永远抢不回来"这个边缘情况。
+// 结果引入了更严重的反向风险: 任何一次正常操作只要因为杀软扫描/网络卡顿/
+// 磁盘慢跑过 30 分钟, 第二个进程就会把锁从**仍在正常工作**的第一个进程
+// 手里抢走, 两边并发写同一个 253MB 二进制——这正是本文件反复强调要杜绝的
+// 数据损坏场景, 而且没有人工介入的余地。两害相权: pid 复用误判"仍持有"
+// 只是烦人(报错文案已提示"确认没有其他实例在跑, 删掉锁文件即可"), 时间
+// 兜底抢活锁是危险且不可逆的——所以不引入时间维度, pid 存活与否是唯一依据。
 function lockIsStale(lock) {
   let pid = NaN;
-  try { pid = parseInt(fs.readFileSync(lock, 'utf8').trim(), 10); } catch { return true; }
-  if (pidAlive(pid)) return false;
-  // 进程已死 -> 立即可接管。pid 回绕的极端情况由 mtime 超时兜底。
-  if (!Number.isInteger(pid)) {
-    try { return Date.now() - fs.statSync(lock).mtimeMs > LOCK_STALE_MS; } catch { return true; }
-  }
-  return true;
+  try { pid = parseInt(wfs.readFileSync(lock, 'utf8').trim(), 10); } catch { return true; }
+  return !pidAlive(pid);
 }
 
 function acquireLock(target) {
   const lock = target + LOCK_SUFFIX;
   for (let i = 0; i < 3; i++) {
     try {
-      const fd = fs.openSync(lock, 'wx');
+      const fd = wfs.openSync(lock, 'wx');
       fs.writeSync(fd, String(process.pid));
       fs.closeSync(fd);
       return lock;
@@ -614,7 +618,7 @@ function acquireLock(target) {
       // 抢同一个陈旧锁时只有一个能成功。
       const claim = lock + '.taking.' + process.pid;
       try {
-        fs.renameSync(lock, claim);
+        wfs.renameSync(lock, claim);
         removeQuietly(claim, 2);
       } catch {
         sleepSync(100); // 没抢到接管权, 让赢家先建好锁, 下一轮会正确报 BUSY
@@ -655,14 +659,14 @@ const LOCK_CODES = process.platform === 'win32'
 function inheritExecMode(tmp, target) {
   if (process.platform === 'win32') return;
   let mode = 0o755;
-  try { mode = fs.statSync(target).mode & 0o777; } catch {}
+  try { mode = wfs.statSync(target).mode & 0o777; } catch {}
   // 只给"本来就有读权限"的身份补执行位, 不放宽可见范围:
   // 0700 -> 0700, 0644 -> 0755, 0755 -> 0755。
   // 直接 `mode | 0o111` 会把管理员刻意收紧的 0700 变成 0711, 让同机其他账号也能
   // 执行(Linux 上 --x 即可 execve), 违反管理员意图且 restore 修不回来。
   const wanted = mode | 0o100 | ((mode & 0o044) >> 2);
   try {
-    fs.chmodSync(tmp, wanted);
+    wfs.chmodSync(tmp, wanted);
   } catch (e) {
     throw new Error('无法给补丁产物设置执行权限(' + e.code + '): ' + tmp +
       '\n  没有执行位的产物无法运行。请检查目录权限, 或改用有写权限的安装位置。');
@@ -673,7 +677,7 @@ function inheritExecMode(tmp, target) {
 // 一次 unlink 失败就放弃会留下 253MB 垃圾, 故重试几次。
 function removeQuietly(p, attempts = 5) {
   for (let i = 0; i < attempts; i++) {
-    try { fs.unlinkSync(p); return true; } catch (e) {
+    try { wfs.unlinkSync(p); return true; } catch (e) {
       if (e.code === 'ENOENT') return true;
       if (!LOCK_CODES.has(e.code) || i === attempts - 1) return false;
       sleepSync(300 * (i + 1));
@@ -697,7 +701,7 @@ function removeQuietly(p, attempts = 5) {
 function commitTmp(tmp, target, attempts = 3) {
   for (let i = 0; i < attempts; i++) {
     try {
-      fs.renameSync(tmp, target);
+      wfs.renameSync(tmp, target);
       return { movedAside: false };
     } catch (e) {
       if (!LOCK_CODES.has(e.code)) { removeQuietly(tmp); throw e; }
@@ -710,7 +714,7 @@ function commitTmp(tmp, target, attempts = 3) {
   // 它的卖点。带时间戳后每次让位都有独立槽位, 陈旧的由 cleanAside() 统一回收。
   const aside = target + ASIDE_SUFFIX + '.' + Date.now();
   try {
-    fs.renameSync(target, aside);
+    wfs.renameSync(target, aside);
   } catch (e) {
     removeQuietly(tmp);
     throw new Error(
@@ -720,12 +724,12 @@ function commitTmp(tmp, target, attempts = 3) {
     );
   }
   try {
-    fs.renameSync(tmp, target);
+    wfs.renameSync(tmp, target);
   } catch (e) {
     // 回滚必须如实上报: 若回滚也失败, 此刻磁盘上没有 claude.exe, 谎称"未被改动"
     // 会让唯一能自救的用户放弃自救。必须把 aside 的绝对路径交给用户。
     let rolledBack = true;
-    try { fs.renameSync(aside, target); } catch { rolledBack = false; }
+    try { wfs.renameSync(aside, target); } catch { rolledBack = false; }
     removeQuietly(tmp);
     if (rolledBack) {
       throw new Error('替换失败(已回滚, claude.exe 未被改动): ' + e.message);
@@ -745,7 +749,7 @@ function cleanAside(target) {
   const dir = path.dirname(target);
   const prefix = path.basename(target) + ASIDE_SUFFIX;
   let names = [];
-  try { names = fs.readdirSync(dir); } catch { return; }
+  try { names = wfs.readdirSync(dir); } catch { return; }
   for (const n of names) {
     // 精确匹配, 不能用 startsWith: 否则会删掉用户自己的
     // claude.exe.cchans-older-notes.txt 之类同前缀文件(审查实证)。
@@ -760,7 +764,7 @@ const healInterrupted = healMissing;
 function atomicWrite(target, buf) {
   const tmp = tmpPathFor(target);
   try {
-    fs.writeFileSync(tmp, buf);
+    wfs.writeFileSync(tmp, buf);
     inheritExecMode(tmp, target);
   } catch (e) {
     removeQuietly(tmp);
@@ -777,7 +781,7 @@ function cleanTmp(target) {
   const dir = path.dirname(target);
   const base = path.basename(target);
   let names = [];
-  try { names = fs.readdirSync(dir); } catch { return; }
+  try { names = wfs.readdirSync(dir); } catch { return; }
   for (const n of names) {
     let suffix = null;
     for (const p of ['.cchans-tmp', '.cchans-probe']) {
@@ -902,7 +906,7 @@ function resignIfDarwin(target) {
 function assertWritable(target) {
   const probe = target + '.cchans-probe.' + process.pid;
   try {
-    fs.writeFileSync(probe, 'x');
+    wfs.writeFileSync(probe, 'x');
   } catch (e) {
     if (e.code === 'EACCES' || e.code === 'EPERM') {
       throw new Error('没有写权限: ' + path.dirname(target) + ' (' + e.code + ')\n' +
@@ -959,7 +963,7 @@ function patchLocked(target, opts, healed, tmpRef) {
   // 两道安全网必须至少有一道生效: 要么实跑验证兜底, 要么源已被 sha256 锚校验过。
   // 都缺席时, 一份"体积和尾串都完好、中段损坏"的备份会产出跑不起来的二进制并
   // 直接落地(第三轮实证的唯一不可恢复路径)。
-  if (opts.verify === false && !fs.existsSync(srcBackup + SHA_SUFFIX)) {
+  if (opts.verify === false && !wfs.existsSync(srcBackup + SHA_SUFFIX)) {
     throw new Error('拒绝在"跳过验证"且"备份无完整性锚"的情况下打补丁 —— 两道安全网\n' +
       '  同时缺席时, 中段损坏的备份会产出跑不起来的 claude 并直接覆盖你现在能用的那个。\n' +
       '  请先跑一次不带 --no-verify 的 patch(会自动补上锚), 之后再用 --no-verify。');
@@ -1002,7 +1006,7 @@ function patchLocked(target, opts, healed, tmpRef) {
   let resigned = null;
   let verified = null;
   try {
-    fs.writeFileSync(tmp, buf); // 必须在 try 内: 磁盘满时才不会留下 253MB 残骸
+    wfs.writeFileSync(tmp, buf); // 必须在 try 内: 磁盘满时才不会留下 253MB 残骸
     if (tmpRef) tmpRef.path = tmp; // 交给信号处理器, Ctrl+C 时能清掉这 253MB
     inheritExecMode(tmp, target);
     resigned = resignIfDarwin(tmp);
@@ -1048,8 +1052,8 @@ function patchLocked(target, opts, healed, tmpRef) {
   // 锚补写: 存量用户的备份是老版本工具建的, 没有锚。此刻刚实证"这份源能产出跑得
   // 起来的二进制", 是补锚最有说服力的时刻 —— 否则他们永远拿不到这层保护(实测: 走
   // 汉化分支时 cand === backupPath, 老代码整个跳过 writeBackup, 锚永不创建)。
-  if (verified && !fs.existsSync(srcBackup + SHA_SUFFIX)) {
-    try { fs.writeFileSync(srcBackup + SHA_SUFFIX, sha256(source)); } catch {}
+  if (verified && !wfs.existsSync(srcBackup + SHA_SUFFIX)) {
+    try { wfs.writeFileSync(srcBackup + SHA_SUFFIX, sha256(source)); } catch {}
   }
   const commit = commitTmp(tmp, target);
   return {
@@ -1078,13 +1082,13 @@ function restore(target) {
   const healed = healInterrupted(target);
   return withTargetLock(target, () => {
     const backupPath = target + BACKUP_SUFFIX;
-    if (!fs.existsSync(backupPath)) {
+    if (!wfs.existsSync(backupPath)) {
       throw new Error('找不到备份: ' + backupPath);
     }
     if (!isClaudeBinary(backupPath)) {
       throw new Error('备份文件不是完整的 Claude Code 二进制(可能上次写盘中断被截断), 拒绝还原: ' + backupPath);
     }
-    const buf = fs.readFileSync(backupPath);
+    const buf = wfs.readFileSync(backupPath);
     if (!backupIntact(backupPath, buf)) {
       throw new Error('备份文件校验失败(sha256 与记录不符, 内容已损坏), 拒绝还原: ' + backupPath +
         '\n  若确信备份没问题, 可删掉锚文件 ' + backupPath + SHA_SUFFIX + ' 后重试;\n' +
@@ -1102,14 +1106,14 @@ function restore(target) {
 
 function status(target) {
   const backupPath = target + BACKUP_SUFFIX;
-  const buf = fs.readFileSync(target);
+  const buf = wfs.readFileSync(target);
   return {
     target,
     version: readVersion(target),
     size: buf.length,
     translated: looksTranslated(buf),
-    hasBackup: fs.existsSync(backupPath),
-    hasZhCnBackup: fs.existsSync(target + ZHCN_BACKUP_SUFFIX),
+    hasBackup: wfs.existsSync(backupPath),
+    hasZhCnBackup: wfs.existsSync(target + ZHCN_BACKUP_SUFFIX),
   };
 }
 
@@ -1118,6 +1122,6 @@ module.exports = {
   patchBuffer, rewriteRegion, loadOversize, stringSegments, insideString,
   atomicWrite, patch, restore, status, resignIfDarwin,
   verifyRuntime, cleanAside, cleanTmp, backupIntact, inNativePool,
-  acquireLock, releaseLock, pidAlive, withTargetLock,
+  acquireLock, releaseLock, pidAlive, withTargetLock, lockIsStale,
   BACKUP_SUFFIX, DICT_PATH,
 };

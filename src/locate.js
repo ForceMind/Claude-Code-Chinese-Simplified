@@ -3,6 +3,7 @@
 // 校验依据: 文件尾部含 Bun 单文件魔术串, 且体积 > 20MB(排除 shim/脚本)。
 
 const fs = require('fs');
+const wfs = require('./wfs'); // 长路径安全的 fs 子集(见 src/winpath.js 注释)
 const path = require('path');
 const os = require('os');
 const { execSync } = require('child_process');
@@ -14,9 +15,9 @@ const PKG_REL = path.join('node_modules', '@anthropic-ai', 'claude-code', 'bin',
 
 function isClaudeBinary(p) {
   try {
-    const st = fs.statSync(p);
+    const st = wfs.statSync(p);
     if (!st.isFile() || st.size < 20 * 1024 * 1024) return false;
-    const fd = fs.openSync(p, 'r');
+    const fd = wfs.openSync(p, 'r');
     try {
       const tailLen = Math.min(65536, st.size);
       const tail = Buffer.alloc(tailLen);
@@ -36,7 +37,7 @@ function isClaudeBinary(p) {
 function readVersion(binPath) {
   try {
     const pkg = path.resolve(path.dirname(binPath), '..', 'package.json');
-    const j = JSON.parse(fs.readFileSync(pkg, 'utf8'));
+    const j = JSON.parse(wfs.readFileSync(pkg, 'utf8'));
     if (j && j.name === '@anthropic-ai/claude-code') return j.version || null;
   } catch {}
   const m = binPath.match(/[\\/](\d+\.\d+\.\d+(?:-[\w.]+)?)[\\/]/);
@@ -89,24 +90,24 @@ const ASIDE_SUFFIX = '.cchans-old';
 // (2026-08-03 审查实证)。纯 fs 操作, 不依赖 patcher, 不引入循环依赖。
 function healMissing(target) {
   try {
-    if (fs.existsSync(target)) return false;
+    if (wfs.existsSync(target)) return false;
     const dir = path.dirname(target);
     const prefix = path.basename(target) + ASIDE_SUFFIX;
     // 必须精确匹配 `<basename>.cchans-old` 或 `<basename>.cchans-old.<时间戳>`。
     // 用 startsWith 会把用户自己的 claude.exe.cchans-older-notes.txt 也算进来 ——
     // 这里是 rename 到 target, 等于把用户文件冒名顶替成 claude.exe(审查实证)。
-    const names = fs.readdirSync(dir).filter(n => n === prefix || n.startsWith(prefix + '.'));
+    const names = wfs.readdirSync(dir).filter(n => n === prefix || n.startsWith(prefix + '.'));
     if (!names.length) return false;
     // 按 mtime 取最新(比依赖文件名里的时间戳字符串排序更稳)
     const ranked = names.map(n => {
       const p = path.join(dir, n);
       let t = 0;
-      try { t = fs.statSync(p).mtimeMs; } catch {}
+      try { t = wfs.statSync(p).mtimeMs; } catch {}
       return { p, t };
     }).sort((a, b) => b.t - a.t);
     for (const { p } of ranked) {
       if (!isClaudeBinary(p)) continue;
-      try { fs.renameSync(p, target); return true; } catch {}
+      try { wfs.renameSync(p, target); return true; } catch {}
     }
   } catch {}
   return false;
@@ -119,10 +120,10 @@ function healMissing(target) {
 // 是否存在可用于自愈的让位副本(只探测, 不动手)
 function healable(target) {
   try {
-    if (fs.existsSync(target)) return null;
+    if (wfs.existsSync(target)) return null;
     const dir = path.dirname(target);
     const prefix = path.basename(target) + ASIDE_SUFFIX;
-    const names = fs.readdirSync(dir).filter(n => n === prefix || n.startsWith(prefix + '.'));
+    const names = wfs.readdirSync(dir).filter(n => n === prefix || n.startsWith(prefix + '.'));
     const ok = names.map(n => path.join(dir, n)).filter(isClaudeBinary);
     return ok.length ? ok : null;
   } catch { return null; }
@@ -140,7 +141,7 @@ function locate(explicit, opts = {}) {
       return null;
     }
     let real = pinned;
-    try { real = fs.realpathSync(pinned); } catch {}
+    try { real = wfs.realpathSync(pinned); } catch {}
     return { path: real, version: readVersion(real), healed, healable: healable(pinned) };
   }
 
@@ -156,7 +157,7 @@ function locate(explicit, opts = {}) {
       // 原生安装的 claude 常是符号链接(指向 versions/<版本>/ 下的真身),
       // 解析成真实路径再补丁, 避免 rename 只替换了链接本身
       let real = p;
-      try { real = fs.realpathSync(p); } catch {}
+      try { real = wfs.realpathSync(p); } catch {}
       return { path: real, version: readVersion(real), healed };
     }
   }

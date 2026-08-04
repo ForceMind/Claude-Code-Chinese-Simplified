@@ -3,7 +3,7 @@
 // 并按运行者身份给出提醒 —— 维护者(工具根目录有 .git, 克隆的仓库)提示
 // 更新词典; 普通用户(npm 安装, 无 .git)提示升级工具。
 
-const fs = require('fs');
+const wfs = require('./wfs'); // 长路径安全的 fs 子集(见 src/winpath.js 注释)
 const path = require('path');
 const { looksTranslated, BACKUP_SUFFIX } = require('./patcher');
 const { readVersion } = require('./locate');
@@ -20,17 +20,17 @@ const SHORT_KEY_BYTES = 12;
 const SHORT_KEY_MAX_HITS = 10;
 
 function isMaintainer() {
-  return fs.existsSync(path.join(ROOT, '.git'));
+  return wfs.existsSync(path.join(ROOT, '.git'));
 }
 
 // 基线 = 纯英文二进制: 优先用备份; target 本身纯英文也可
 function resolveBaseline(target) {
   const backupPath = target + BACKUP_SUFFIX;
-  if (fs.existsSync(backupPath)) {
-    const b = fs.readFileSync(backupPath);
+  if (wfs.existsSync(backupPath)) {
+    const b = wfs.readFileSync(backupPath);
     if (!looksTranslated(b)) return { buf: b, from: backupPath };
   }
-  const t = fs.readFileSync(target);
+  const t = wfs.readFileSync(target);
   if (!looksTranslated(t)) return { buf: t, from: target };
   throw new Error('找不到纯英文基线(target 已汉化且无备份), 无法扫描。请先重装/升级 Claude Code。');
 }
@@ -50,8 +50,8 @@ function scan(target, opts = {}) {
   // 命中要么无效要么乱码, 详见 DEVELOPMENT-NOTES §十三)。解析失败则退回全文件。
   const mainMod = bunfmt.findMainModule(whole);
   const buf = mainMod ? whole.subarray(mainMod.sourceStart, mainMod.sourceEnd) : whole;
-  const safe = JSON.parse(fs.readFileSync(SAFE_PATH, 'utf8'));
-  const over = fs.existsSync(OVER_PATH) ? JSON.parse(fs.readFileSync(OVER_PATH, 'utf8')) : {};
+  const safe = JSON.parse(wfs.readFileSync(SAFE_PATH, 'utf8'));
+  const over = wfs.existsSync(OVER_PATH) ? JSON.parse(wfs.readFileSync(OVER_PATH, 'utf8')) : {};
 
   const misses = [];
   const shortKeyWarnings = [];
