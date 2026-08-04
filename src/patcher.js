@@ -413,14 +413,17 @@ function insideString(segs, s, e) { return findSegment(segs, s, e) !== null; }
 // (审查实证: 已部署产物里长上下文计费错误的识别路径因此废掉)。
 // 判据: 字符串开引号前紧邻 includes(/startsWith(/endsWith(/indexOf(/match(/split(
 // 或比较运算符或 case; 闭引号后紧跟比较运算符。命中任一 → 整段不译。
-const CMP_BEFORE = /(?:includes|startsWith|endsWith|indexOf|match|split)\($|[!=]==?$|case $/;
-const CMP_AFTER = /^[!=]==?/;
+// 审查实证收紧(2026-08-04): minified 源里 case"(无空格) 464 处 vs case "(带空格)
+// 仅 25 处——旧版只认后者, 95% 的 case 标签不受守卫; === 前后也常见贴身空格
+// (=== "x" / "x" === y); 接收者位置的谓词("字面量".includes(x))原来完全不设防。
+const CMP_BEFORE = /(?:\.(?:includes|startsWith|endsWith|indexOf|match|split)\(|[!=]==?|(?:^|[^A-Za-z0-9_$])case)\s*$/;
+const CMP_AFTER = /^\s*(?:[!=]==?|\.(?:includes|startsWith|endsWith|indexOf|match|split)\()/;
 
 function isComparisonString(region, seg) {
   const [s, e] = seg;
-  const before = region.slice(Math.max(0, s - 13), Math.max(0, s - 1)).toString('latin1');
+  const before = region.slice(Math.max(0, s - 20), Math.max(0, s - 1)).toString('latin1');
   if (CMP_BEFORE.test(before)) return true;
-  const after = region.slice(e + 1, Math.min(region.length, e + 4)).toString('latin1');
+  const after = region.slice(e + 1, Math.min(region.length, e + 14)).toString('latin1');
   return CMP_AFTER.test(after);
 }
 
@@ -470,6 +473,10 @@ function rewriteRegion(region, safeDict, overDict, onProgress) {
     const enBuf = Buffer.from(it.en, 'utf8');
     const zhBuf = Buffer.from(it.zh, 'utf8');
     if (zhBuf.includes(0)) continue;
+    // safeDict 按约定不含超长条目(build-dict 已过滤), 这里补一道跳过双保险:
+    // 若上游误混入超长安全词条, 静默吃预算比"跳过"更危险(审查实证: 极端下
+    // 可触发拼接长度断言中止写入)——两个来源(safe/over)都必须守住这条规则。
+    if (!it.over && zhBuf.length > enBuf.length) continue;
     const guardPrev = isIdByte(enBuf[0]);
     const guardNext = isIdByte(enBuf[enBuf.length - 1]);
     let from = 0, idx;

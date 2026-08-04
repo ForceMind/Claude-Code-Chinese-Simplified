@@ -376,6 +376,20 @@ test('patchBuffer(带 segs): 字符串外的命中不译', () => {
   assert.strictEqual(r.occurrences, 1);
   assert.strictEqual(r.codeSkips, 1, '裸代码位置的命中应跳过');
 });
+test('比较谓词守卫: case 无空格/=== 贴身/接收者位置(2026-08-04 审查收紧)', () => {
+  const cases=[
+    ['switch(x){case"not found":return 1}', true],
+    ['if(e==="not found")y()', true],
+    ['"not found".includes(x)', true],
+    ['show("not found")', false],
+  ];
+  for(const [code,expectSkip] of cases){
+    const b=Buffer.from(code,'latin1');
+    const r=patcher.patchBuffer(b, {'not found':'未找到'}, null, {segs:patcher.stringSegments(b)});
+    if(expectSkip) assert.strictEqual(r.occurrences, 0, code);
+    else assert.strictEqual(r.occurrences, 1, code);
+  }
+});
 // ── 汇总 ────────────────────────────────────────────────────────────────
 try { fs.rmSync(tmpRoot, { recursive: true, force: true }); } catch {}
 
