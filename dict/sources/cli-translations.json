@@ -633,10 +633,6 @@
     "zh": "自动允许模式："
   },
   {
-    "en": "Auto-compact",
-    "zh": "自动压缩"
-  },
-  {
     "en": "Auto-compact is currently disabled (see /config)",
     "zh": "自动压缩当前已禁用（见 /config）"
   },
