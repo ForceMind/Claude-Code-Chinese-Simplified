@@ -5,12 +5,11 @@
 **零依赖 · 一条命令 · 跟随新版 · 随时还原**
 
 ```bash
-git clone https://github.com/ForceMind/Claude-Code-Chinese-Simplified
-cd Claude-Code-Chinese-Simplified
-node bin/cchans.js patch
+npx cchans patch
+# 或全局装一份, 之后直接用 cchans 命令:
+npm install -g cchans && cchans patch
 ```
 
-clone 下来直接跑，**不需要 `npm install`**（工具本身零依赖，只要 Node.js ≥ 18）。
 `patch` 会自动定位你的 `claude.exe`、备份、打补丁，并**实际运行产物验证**——
 不仅验证能启动，还验证**中文确实正确显示**（乱码/未生效都会被拦下）；
 验证不过就中止，你的 `claude.exe` 一个字节都不会变。
@@ -23,7 +22,13 @@ clone 下来直接跑，**不需要 `npm install`**（工具本身零依赖，�
 > 这是当前"零依赖等长替换"路线下的固有取舍；交互式使用基本无感，
 > 大量脚本化调用 `claude -p` 的场景请自行权衡（`restore` 随时可完整还原）。
 
-> 本工具尚未发布到 npm，`npx cchans` 暂不可用。
+想改词典或看源码，clone 仓库直接跑（同样不需要 `npm install`，工具本身零依赖，只要 Node.js ≥ 18）：
+
+```bash
+git clone https://github.com/ForceMind/Claude-Code-Chinese-Simplified
+cd Claude-Code-Chinese-Simplified
+node bin/cchans.js patch
+```
 
 ## 为什么造这个轮子
 
@@ -56,18 +61,17 @@ PE/Mach-O/ELF、模块表一个字节不动。实测 v2.1.220：`dict/oversize.j
 
 ## 使用
 
-在仓库目录下执行（下面用 `cchans` 代指 `node bin/cchans.js`）：
+`npm install -g cchans` 装过之后 `cchans` 就是全局命令，直接用；`git clone` 下来跑的话
+把下面的 `cchans` 换成 `node bin/cchans.js`（或者 `npm link` 一次，之后一样直接用 `cchans`）：
 
 ```bash
-node bin/cchans.js patch [路径]      # 打补丁(自动定位、自动备份、实跑验证、可重复执行)
-node bin/cchans.js patch --full     # 实验: 全局长度预算, 放入超长译文(覆盖率更高)
-node bin/cchans.js restore [路径]   # 还原纯英文
-node bin/cchans.js status [路径]    # 查看状态(版本/是否已汉化/备份情况)
-node bin/cchans.js scan [路径]      # 覆盖扫描 + 词典滞后诊断(--json 完整输出 / --prompt 生成翻译任务提示词)
-node bin/cchans.js locate           # 只定位 Claude Code 二进制
+cchans patch [路径]      # 打补丁(自动定位、自动备份、实跑验证、可重复执行)
+cchans patch --full     # 实验: 全局长度预算, 放入超长译文(覆盖率更高)
+cchans restore [路径]   # 还原纯英文
+cchans status [路径]    # 查看状态(版本/是否已汉化/备份情况)
+cchans scan [路径]      # 覆盖扫描 + 词典滞后诊断(--json 完整输出 / --prompt 生成翻译任务提示词)
+cchans locate           # 只定位 Claude Code 二进制
 ```
-
-嫌路径长可以 `npm link` 一次，之后就能直接用 `cchans patch`。
 
 路径通常可省略（自动从 PATH 和常见安装位置定位），也可用环境变量 `CCHANS_TARGET` 指定。
 打补丁约半分钟（只扫描主模块源码区），实跑验证另需约 10~30 秒。
@@ -80,7 +84,7 @@ node bin/cchans.js locate           # 只定位 Claude Code 二进制
 它被运行中的进程映射着删不掉，下次 `patch`/`restore` 会自动回收。单次操作的峰值占盘
 约为二进制体积的 4~5 倍，小磁盘环境请留意。
 
-出任何问题都可以 `node bin/cchans.js restore` 一键还原成纯英文原版（备份是打补丁时自动做的）。
+出任何问题都可以 `cchans restore` 一键还原成纯英文原版（备份是打补丁时自动做的）。
 
 ## 平台支持
 
