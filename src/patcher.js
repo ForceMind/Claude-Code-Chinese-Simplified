@@ -13,6 +13,7 @@
 
 const fs = require('fs');
 const wfs = require('./wfs'); // 长路径安全的 fs 子集(见 src/winpath.js 注释)
+const { toLongPath } = require('./winpath');
 const os = require('os');
 const path = require('path');
 const { execFileSync, spawnSync } = require('child_process');
@@ -848,10 +849,11 @@ function verifyRuntime(exePath) {
     if (k === 'CLAUDECODE' || k.startsWith('CLAUDE_CODE_')) delete env[k];
   }
   // Windows 上 CreateProcess 卡 MAX_PATH(260): 路径一长 spawn 就 ENOENT, 会被
-  // 误判成"补丁产物跑不起来"。加 \\?\ 前缀绕过(实测 274 字符路径由此恢复正常)。
-  const spawnPath = (process.platform === 'win32' && exePath.length > 200 && /^[a-zA-Z]:\\/.test(exePath))
-    ? '\\\\?\\' + exePath
-    : exePath;
+  // 误判成"补丁产物跑不起来"。复用 toLongPath 加 \\?\ 前缀绕过(此前这里是一份
+  // 单独手写的等价逻辑, 只在 win32 & 长度>200 & 盘符绝对路径时才加前缀; 统一
+  // 成 toLongPath 后短路径也会加前缀——两者对 CreateProcess 都合法, 实测
+  // 274 字符路径和现实生产短路径均正常, 不引入行为差异)。
+  const spawnPath = toLongPath(exePath);
   try {
     let cjkSeen = 0;
     for (const args of SMOKE_ARGS) {
