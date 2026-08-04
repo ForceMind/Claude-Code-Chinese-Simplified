@@ -246,7 +246,12 @@ function inNativePool(buf, idx, len) {
 // patchLocked 的真实路径始终传入; 合成测试可不传(保持字节级语义可单测)。
 function patchBuffer(buf, dict, onProgress, opts = {}) {
   const segs = opts.segs || null;
-  const keys = Object.keys(dict);
+  // 长词条优先(与 --full 引擎的 rewriteRegion 一致): 词典近似按字母序排列,
+  // 短语条目(如 "Sandbox")常是长句条目(如 "Sandbox is not enabled")的前缀。
+  // 若按原始顺序处理, 短条目先吃掉长句开头几个字节, 长条目随后 indexOf 落空,
+  // 产出"半句中文半句英文"的割裂文案。长词条先处理可让完整短语先被认领,
+  // 之后短条目的 indexOf 天然找不到已被替换的字节, 只命中真正独立的短语出现。
+  const keys = Object.keys(dict).sort((a, b) => Buffer.byteLength(b) - Buffer.byteLength(a));
   let keysHit = 0, occurrences = 0, boundarySkips = 0, poolSkips = 0, codeSkips = 0, cmpSkips = 0;
   for (let k = 0; k < keys.length; k++) {
     const en = keys[k];
