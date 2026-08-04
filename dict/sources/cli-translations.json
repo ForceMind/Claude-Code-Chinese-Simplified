@@ -8444,5 +8444,37 @@
   {
     "en": "Delete this and all remaining",
     "zh": "删除此项及剩余全部"
+  },
+  {
+    "en": "Try rephrasing the request in a new session or change your model.",
+    "zh": "请在新会话中重新表述请求，或更换模型。"
+  },
+  {
+    "en": "Configure usage credits or request them from your admin when you hit a limit",
+    "zh": "配置用量额度，或在达到限制时向管理员申请"
+  },
+  {
+    "en": "These will be written to ",
+    "zh": "写入 "
+  },
+  {
+    "en": " under env:",
+    "zh": " 的 env 下："
+  },
+  {
+    "en": "Report a bug or share your conversation",
+    "zh": "反馈 Bug 或分享你的对话"
+  },
+  {
+    "en": "Error: Unable to create cloud session",
+    "zh": "错误：无法创建云端会话"
+  },
+  {
+    "en": "Show cloud session URL and QR code",
+    "zh": "显示云端会话的 URL 和二维码"
+  },
+  {
+    "en": " /plugin manage - Manage installed plugins",
+    "zh": " /plugin manage - 管理已安装的插件"
   }
 ]
