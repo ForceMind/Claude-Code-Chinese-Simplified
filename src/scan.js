@@ -100,7 +100,12 @@ function renderReport(r) {
   lines.push('基线: ' + r.baseline + (r.version ? ' (Claude Code ' + r.version + ')' : ''));
   lines.push('等长词典: ' + r.safeHit + '/' + r.safeTotal + ' 命中, 未命中 ' + r.safeMiss +
     ' 条 (' + (r.missRate * 100).toFixed(1) + '%)');
-  lines.push('超长词典(暂不可用): ' + r.oversizeStillPresent + '/' + r.oversizeTotal + ' 条英文原串仍存在');
+  // 这里只是裸的 indexOf 存在性计数, 没有过字符串边界/比较谓词守卫也没有
+  // 模拟预算裁决(那是 --full 自己在打补丁时才做的事, 在 scan 里重算一遍
+  // 21MB 源码区的 stringSegments 会显著拖慢这个本该是"秒级预览"的命令)。
+  // 所以这个数字是"--full 能放入数量"的**上限**估计, 不是精确预测 ——
+  // 曾经这里写"暂不可用", 是 --full 引擎还不存在时期的措辞, 现已过时。
+  lines.push('超长词典(--full 专用, 数字为上限估计): ' + r.oversizeStillPresent + '/' + r.oversizeTotal + ' 条英文原串仍存在');
   if (r.shortKeyWarnings.length) {
     lines.push('');
     lines.push('⚠ 短词命中异常多(可能误伤非目标位置, 建议人工核查):');

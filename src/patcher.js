@@ -448,6 +448,13 @@ function isComparisonString(region, seg) {
 // 同一句话在 A 处中文 B 处英文的割裂)。
 //
 // 守卫与等长路径完全一致: 词边界 + 原生池 + NUL 校验 + 长串优先认领不重叠。
+//
+// 已知设计取舍(2026-08-04 审查记录, 当前无实际影响): 超长候选的区间认领
+// (claim)发生在扫描阶段、早于预算裁决——若某条超长词条最终因预算不足被
+// 放弃(overDropped), 它认领掉的区间不会退还, 该区间内原本能命中的更短
+// 词条也会被判定"重叠"而一并跳过。后果只是覆盖率打折(该区间保留纯英文),
+// 不会损坏产物。要修就要把"认领"和"预算裁决"拆成两遍扫描, 目前 overDropped
+// 恒为 0(预算富余), 这条从未真正触发过, 暂不为一个不存在的场景增加复杂度。
 function rewriteRegion(region, safeDict, overDict, onProgress) {
   const segs = stringSegments(region); // 结构性守卫: 只在字符串字面量文本内替换
   const entries = [];
