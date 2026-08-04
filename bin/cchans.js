@@ -74,16 +74,25 @@ try {
         console.log('  这是本工具唯一能拦住"补丁把二进制改坏"的安全网 —— 关掉它意味着');
         console.log('  一个跑不起来的 claude 可能直接盖掉你现在能用的那个。仅在明知后果时使用。');
       }
+      if (flags.has('--full')) {
+        console.log('已启用 --full(实验): 全局长度预算重写, 将尝试放入超长译文。');
+      }
       console.log('打补丁中(扫描主模块源码区约半分钟, 请稍候)…');
       const r = patcher.patch(target, {
         onProgress: progress('词条'),
         verify: !flags.has('--no-verify'),
+        full: flags.has('--full'),
         onVerify: () => { endProgress(); console.log('验证中(实跑补丁产物, 约 10s)…'); },
       });
       endProgress();
       console.log('✓ 完成: ' + r.keysHit + '/' + r.dictTotal + ' 词条命中, 共替换 ' + r.occurrences +
         ' 处(守卫跳过: 标识符内 ' + r.boundarySkips + ' 处 / 原生常量池 ' + r.poolSkips +
         ' 处), 耗时 ' + r.seconds.toFixed(1) + 's');
+      if (r.overEntries !== undefined) {
+        console.log('  超长译文: 放入 ' + r.overEntries + ' 条 / ' + r.overOccurrences +
+          ' 处' + (r.overDropped ? ', 预算不足放弃 ' + r.overDropped + ' 条' : '') +
+          ', 预算余量 ' + r.slack + ' 字节');
+      }
       console.log(r.verified ? '  运行验证: 通过(--version + doctor + mcp list 实跑)'
                              : '  运行验证: 已跳过(--no-verify) —— 不保证产物能启动');
       if (r.movedAside) {
@@ -151,6 +160,7 @@ try {
         '',
         '用法:',
         '  cchans patch [路径]     打补丁(自动定位/备份/可重复执行/实跑验证)',
+        '                          --full 实验: 全局长度预算, 放入超长译文(覆盖率更高)',
         '                          --no-verify 跳过实跑验证(不推荐, 不保证产物能启动)',
         '  cchans restore [路径]   还原纯英文',
         '  cchans status [路径]    查看状态',

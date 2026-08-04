@@ -306,6 +306,76 @@ test('bunfmt: 截断/伪造的结构 -> 安全返回 null 而非错位解析', (
   assert.strictEqual(bunfmt.findMainModule(Buffer.from('no trailer here')), null, '无 trailer');
 });
 
+// ── 9. rewriteRegion(--full 全局预算引擎) ─────────────────────────────
+test('rewriteRegion: 长度不变, 短译省字节供给超长译文', () => {
+  const region = Buffer.from('xx "Hello world" yy "Goodbye now" zz', 'latin1');
+  const r = patcher.rewriteRegion(region,
+    { 'Hello world': '你好' },          // 11B -> 6B, 省 5
+    { 'Goodbye now': '再见了朋友' });    // 11B -> 15B, 需 4
+  assert.strictEqual(r.buf.length, region.length, '总长度必须不变');
+  const out = r.buf.toString('utf8');
+  assert.ok(out.includes('你好'));
+  assert.ok(out.includes('再见了朋友'), '超长译文应被放入');
+  assert.strictEqual(r.stats.overEntries, 1);
+  assert.strictEqual(r.stats.slack, 1);
+  assert.ok(/ +zz *$/.test(out) || out.endsWith(' '), '差额应以区末空格补齐');
+});
+
+test('rewriteRegion: 预算不足时整条放弃, 保留英文', () => {
+  const region = Buffer.from('aa "Hi" bb "Farewell my friend" cc', 'latin1');
+  const r = patcher.rewriteRegion(region,
+    {},                                        // 没有安全条目 -> 预算为 0
+    { 'Farewell my friend': '永别了我的朋友们再见' }); // 需要更多字节
+  assert.strictEqual(r.buf.length, region.length);
+  assert.ok(r.buf.toString('utf8').includes('Farewell my friend'), '应保留英文');
+  assert.strictEqual(r.stats.overDropped, 1);
+});
+
+test('rewriteRegion: 词边界守卫仍然生效', () => {
+  const region = Buffer.from('SandboxNetworkAccess and "Sandbox mode" here', 'latin1');
+  const r = patcher.rewriteRegion(region, { 'Sandbox mode': '沙盒模式' }, {});
+  const out = r.buf.toString('utf8');
+  assert.ok(out.includes('SandboxNetworkAccess'), '标识符不得被破坏');
+  assert.ok(out.includes('沙盒模式'));
+});
+
+test('rewriteRegion: 长串优先, 子串不抢先(与等长路径同语义)', () => {
+  const region = Buffer.from('say "Press Esc to cancel" ok', 'latin1');
+  const r = patcher.rewriteRegion(region,
+    { 'Press Esc to cancel': '按 Esc 取消', ' to cancel': ' 取消' }, {});
+  const out = r.buf.toString('utf8');
+  assert.ok(out.includes('按 Esc 取消'), '长串整体被译');
+  assert.strictEqual(r.stats.occurrences, 1, '短子串不应重复命中');
+});
+// ── 10. 字符串分段器与比较谓词守卫 ─────────────────────────────────────
+test('stringSegments: 正确切出单双引号/模板字符串文本', () => {
+  const b=Buffer.from('let a="hi";f(/"x"/);let t=`tpl ${1}txt`;//c "no"', 'latin1');
+  const segs=patcher.stringSegments(b);
+  const texts=segs.map(([s,e])=>b.slice(s,e).toString('latin1'));
+  assert.ok(texts.includes('hi'));
+  assert.ok(texts.includes('tpl '), '模板文本段');
+  assert.ok(texts.includes('txt'), '表达式后的模板文本段');
+  assert.ok(!texts.some(t=>t.includes('no')), '注释里的引号不算字符串');
+  assert.ok(!texts.includes('x'), '正则里的引号不开字符串');
+});
+
+test('比较谓词守卫: includes()/===/case 的字符串不译', () => {
+  const b=Buffer.from('if(e.includes("not found")||x==="not found"){show("not found")}', 'latin1');
+  const r=patcher.patchBuffer(b, {'not found':'未找到'}, null, {segs:patcher.stringSegments(b)});
+  const out=b.toString('utf8');
+  assert.strictEqual(r.cmpSkips, 2, '两处谓词都应跳过');
+  assert.strictEqual(r.occurrences, 1, '仅显示用途的那处被译');
+  assert.ok(out.includes('includes("not found")'), 'includes 谓词保持英文');
+  assert.ok(out.includes('==="not found"'), '=== 谓词保持英文');
+  assert.ok(out.includes('show("未找到'), '显示处被译');
+});
+
+test('patchBuffer(带 segs): 字符串外的命中不译', () => {
+  const b=Buffer.from('var not_x=1;say("Delete hook");Delete hook;', 'latin1');
+  const r=patcher.patchBuffer(b, {'Delete hook':'删钩子'}, null, {segs:patcher.stringSegments(b)});
+  assert.strictEqual(r.occurrences, 1);
+  assert.strictEqual(r.codeSkips, 1, '裸代码位置的命中应跳过');
+});
 // ── 汇总 ────────────────────────────────────────────────────────────────
 try { fs.rmSync(tmpRoot, { recursive: true, force: true }); } catch {}
 

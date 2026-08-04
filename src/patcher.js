@@ -241,15 +241,19 @@ function inNativePool(buf, idx, len) {
   return inCStringTable(buf, idx, len) || hasDenseIsolatedNuls(buf, idx, len);
 }
 
-function patchBuffer(buf, dict, onProgress) {
+// opts.segs: 传入 stringSegments 结果时, 追加两道结构性守卫 ——
+//   (1) 只在字符串字面量文本内替换; (2) 跳过比较谓词字符串。
+// patchLocked 的真实路径始终传入; 合成测试可不传(保持字节级语义可单测)。
+function patchBuffer(buf, dict, onProgress, opts = {}) {
+  const segs = opts.segs || null;
   const keys = Object.keys(dict);
-  let keysHit = 0, occurrences = 0, boundarySkips = 0, poolSkips = 0;
+  let keysHit = 0, occurrences = 0, boundarySkips = 0, poolSkips = 0, codeSkips = 0, cmpSkips = 0;
   for (let k = 0; k < keys.length; k++) {
     const en = keys[k];
     const enBuf = Buffer.from(en, 'utf8');
     const zhBuf = Buffer.from(dict[en], 'utf8');
     if (zhBuf.length > enBuf.length) continue;
-    if (zhBuf.includes(0)) continue; // 双保险: 译文含 NUL 会破坏原生池守卫依赖的不变式 // 词典保证不会, 双保险
+    if (zhBuf.includes(0)) continue; // 双保险: 译文含 NUL 会破坏原生池守卫依赖的不变式
     const guardPrev = isIdByte(enBuf[0]);
     const guardNext = isIdByte(enBuf[enBuf.length - 1]);
     let from = 0, hits = 0, idx;
@@ -265,6 +269,11 @@ function patchBuffer(buf, dict, onProgress) {
         from = idx + enBuf.length; // 命中在原生字符串池, 跳过(可能被尾部合并引用)
         continue;
       }
+      if (segs) {
+        const seg = findSegment(segs, idx, idx + enBuf.length);
+        if (!seg) { codeSkips++; from = idx + enBuf.length; continue; }
+        if (isComparisonString(buf, seg)) { cmpSkips++; from = idx + enBuf.length; continue; }
+      }
       zhBuf.copy(buf, idx);
       buf.fill(0x20, idx + zhBuf.length, idx + enBuf.length); // 空格填充到原长
       hits++;
@@ -273,7 +282,265 @@ function patchBuffer(buf, dict, onProgress) {
     if (hits) { keysHit++; occurrences += hits; }
     if (onProgress && (k + 1) % 50 === 0) onProgress(k + 1, keys.length, keysHit);
   }
-  return { keysHit, occurrences, boundarySkips, poolSkips };
+  return { keysHit, occurrences, boundarySkips, poolSkips, codeSkips, cmpSkips };
+}
+
+// JS 字符串字面量分段器 —— --full 引擎的结构性守卫。
+//
+// 为什么需要: 超长词典(oversize.json)的 477 条从未被实际应用过, 首次全量放入时
+// 实测有条目命中了**字符串字面量之外**的代码位置, 全角冒号落进代码 = SyntaxError
+// (被运行时验证当场拦下)。逐条拉黑是打地鼠, 结构性修法是: 只允许替换落在
+// '…' / "…" / 模板字面量文本段 内部。
+//
+// 失败方向安全: 分段器把字符串误判成代码 → 跳过该处 → 少翻一条, 永不破坏语法;
+// 反向误判(代码判成字符串)理论上可能 → 但产物过不了实跑验证, 不会落地。
+// 源码区是 100% ASCII(实证), 按字节扫描即可。regex/除号歧义用标准启发式:
+// 前一个有效字节是 标识符/)/]/}/. 之一 → 除号, 否则 → 正则起始。
+function stringSegments(buf) {
+  const segs = [];           // [start,end) 均为"字符串文本"字节区间(不含引号本身)
+  const n = buf.length;
+  // 模板嵌套栈: 每进入一层 \${ 表达式压入一个花括号深度计数。
+  // 必须按深度配对: \${cond?{a:1}:b} 里第一个 } 关的是对象字面量, 不是模板表达式
+  // (2026-08-04 实证: 不配对会在 JSON 解析器一类的代码上引发千字节级状态错位)。
+  const stack = [];
+  let i = 0, prevSig = 0;    // prevSig = 上一个有效(非空白)字节, 用于 regex 判定
+  let idStart = -1;          // 当前标识符跑的起点(用于识别 return 等关键字后的正则)
+  const isReSafePrev = b =>  // 这些字节之后的 '/' 是除号
+    (b >= 0x41 && b <= 0x5a) || (b >= 0x61 && b <= 0x7a) || (b >= 0x30 && b <= 0x39) ||
+    b === 0x5f || b === 0x24 || b === 0x29 || b === 0x5d || b === 0x7d || b === 0x2e;
+  // 这些关键字之后的 '/' 是正则(minified 里 return/^a/.test(x) 很常见)
+  const RE_KEYWORDS = new Set(['return', 'typeof', 'case', 'in', 'of', 'instanceof',
+    'new', 'delete', 'void', 'throw', 'do', 'else', 'yield', 'await']);
+
+  function scanTemplateText() {                  // 从 i 起扫模板文本, 返回后 i 停在 ` 或 ${ 之后
+    let s = i;
+    while (i < n) {
+      const t = buf[i];
+      if (t === 0x5c) { i += 2; continue; }
+      if (t === 0x60) { segs.push([s, i]); prevSig = 0x60; i++; return; }
+      if (t === 0x24 && buf[i + 1] === 0x7b) { segs.push([s, i]); stack.push(0); i += 2; return; }
+      i++;
+    }
+    segs.push([s, n]);
+  }
+
+  while (i < n) {
+    const c = buf[i];
+    if (c === 0x27 || c === 0x22) {              // ' 或 "
+      const q = c, s = i + 1;
+      i++;
+      while (i < n && buf[i] !== q) { if (buf[i] === 0x5c) i++; i++; }
+      segs.push([s, Math.min(i, n)]);
+      prevSig = q; idStart = -1; i++;
+      continue;
+    }
+    if (c === 0x60) {                            // ` 模板起始
+      i++;
+      scanTemplateText();
+      continue;
+    }
+    if (c === 0x7b) {                            // { : 在模板表达式内要计深度
+      if (stack.length) stack[stack.length - 1]++;
+      prevSig = c; idStart = -1; i++;
+      continue;
+    }
+    if (c === 0x7d) {                            // }
+      if (stack.length) {
+        if (stack[stack.length - 1] === 0) {     // 模板表达式结束, 回到模板文本
+          stack.pop();
+          i++;
+          scanTemplateText();
+          continue;
+        }
+        stack[stack.length - 1]--;
+      }
+      prevSig = c; idStart = -1; i++;
+      continue;
+    }
+    if (c === 0x2f) {                            // /
+      const d = buf[i + 1];
+      if (d === 0x2f) { i += 2; while (i < n && buf[i] !== 0x0a) i++; continue; }        // 行注释
+      if (d === 0x2a) { i += 2; while (i + 1 < n && !(buf[i] === 0x2a && buf[i + 1] === 0x2f)) i++; i += 2; continue; } // 块注释
+      let isRegex = !isReSafePrev(prevSig);
+      if (!isRegex && idStart >= 0) {            // prevSig 是标识符字符: 看整个词是不是关键字
+        isRegex = RE_KEYWORDS.has(buf.slice(idStart, i).toString('latin1').trim());
+      }
+      if (isRegex) {                             // 正则字面量
+        i++;
+        let inClass = false;
+        while (i < n) {
+          const t = buf[i];
+          if (t === 0x5c) { i += 2; continue; }
+          if (t === 0x5b) inClass = true;
+          else if (t === 0x5d) inClass = false;
+          else if (t === 0x2f && !inClass) break;
+          else if (t === 0x0a) break;            // 容错: 换行终止
+          i++;
+        }
+        prevSig = 0x2f; idStart = -1; i++;
+        continue;
+      }
+      prevSig = c; idStart = -1; i++;
+      continue;
+    }
+    if (c !== 0x20 && c !== 0x09 && c !== 0x0a && c !== 0x0d) {
+      // 维护标识符跑: 用于关键字判定
+      const isIdc = (c >= 0x41 && c <= 0x5a) || (c >= 0x61 && c <= 0x7a) ||
+                    (c >= 0x30 && c <= 0x39) || c === 0x5f || c === 0x24;
+      if (isIdc) { if (idStart < 0) idStart = i; } else idStart = -1;
+      prevSig = c;
+    } else {
+      // 空白结束一个标识符跑(return /re/ 中间有空格)
+      if (idStart >= 0 && !RE_KEYWORDS.has(buf.slice(idStart, i).toString('latin1'))) idStart = -1;
+    }
+    i++;
+  }
+  return segs;
+}
+
+// 判定 [s,e) 是否完整落在某个字符串文本段内(segs 已按 start 有序)。
+// 返回所在段, 未落入返回 null。
+function findSegment(segs, s, e) {
+  let lo = 0, hi = segs.length;
+  while (lo < hi) { const mid = (lo + hi) >> 1; if (segs[mid][0] <= s) lo = mid + 1; else hi = mid; }
+  return (lo > 0 && segs[lo - 1][1] >= e) ? segs[lo - 1] : null;
+}
+function insideString(segs, s, e) { return findSegment(segs, s, e) !== null; }
+
+// 比较谓词守卫 —— 与"显示用字符串"同为字面量、却绝不能翻的另一类:
+//   e.includes("Usage credits are required…") / x === "not found" / case "…":
+// API/系统返回的是英文, 把谓词字符串译成中文后条件永远为假 → **功能静默失效**
+// (审查实证: 已部署产物里长上下文计费错误的识别路径因此废掉)。
+// 判据: 字符串开引号前紧邻 includes(/startsWith(/endsWith(/indexOf(/match(/split(
+// 或比较运算符或 case; 闭引号后紧跟比较运算符。命中任一 → 整段不译。
+const CMP_BEFORE = /(?:includes|startsWith|endsWith|indexOf|match|split)\($|[!=]==?$|case $/;
+const CMP_AFTER = /^[!=]==?/;
+
+function isComparisonString(region, seg) {
+  const [s, e] = seg;
+  const before = region.slice(Math.max(0, s - 13), Math.max(0, s - 1)).toString('latin1');
+  if (CMP_BEFORE.test(before)) return true;
+  const after = region.slice(e + 1, Math.min(region.length, e + 4)).toString('latin1');
+  return CMP_AFTER.test(after);
+}
+
+// 全局长度预算重写引擎(--full, 实验特性)。
+//
+// 把约束从「每条译文必须等长」放宽为「整个 JS 源码区总长度不变」:
+// 短译文不再逐条用空格填满槽位, 省下的字节汇成全局预算, 用来容纳超长译文
+// (oversize.json 里那些"中文比英文长"的条目); 整体重排后若仍比原区短,
+// 在区末补 ASCII 空格凑回原长(区末是行注释/语句边界, 补空格语法无害)。
+// 模块表里 contents 的 {offset,length} 一个字节都不用动, 仍不解析 PE/Mach-O/ELF。
+//
+// 实测(v2.1.220 + 当前词典): 安全条目省 9683 字节, 全部 387 条可命中的超长
+// 条目只需 5138 字节, 净余 4545 —— 这一版能全量容纳。若未来某版预算不足,
+// 按「单条总增量」从贵到贱整条放弃(同一条文案要么全译要么全不译, 不出现
+// 同一句话在 A 处中文 B 处英文的割裂)。
+//
+// 守卫与等长路径完全一致: 词边界 + 原生池 + NUL 校验 + 长串优先认领不重叠。
+function rewriteRegion(region, safeDict, overDict, onProgress) {
+  const segs = stringSegments(region); // 结构性守卫: 只在字符串字面量文本内替换
+  const entries = [];
+  for (const [en, zh] of Object.entries(safeDict)) entries.push({ en, zh, over: false });
+  for (const [en, zh] of Object.entries(overDict)) entries.push({ en, zh, over: true });
+  entries.sort((a, b) => Buffer.byteLength(b.en) - Buffer.byteLength(a.en));
+
+  // 认领区间(有序数组 + 二分插入, 避免 O(n^2) 线性扫)
+  const starts = [], ends = [];
+  function overlaps(s, e) {
+    let lo = 0, hi = starts.length;
+    while (lo < hi) { const mid = (lo + hi) >> 1; if (starts[mid] < e) lo = mid + 1; else hi = mid; }
+    // lo = 第一个 start >= e 的位置; 检查它前面那个区间是否越过 s
+    return lo > 0 && ends[lo - 1] > s;
+  }
+  function claim(s, e) {
+    let lo = 0, hi = starts.length;
+    while (lo < hi) { const mid = (lo + hi) >> 1; if (starts[mid] < s) lo = mid + 1; else hi = mid; }
+    starts.splice(lo, 0, s); ends.splice(lo, 0, e);
+  }
+
+  const stats = { keysHit: 0, occurrences: 0, boundarySkips: 0, poolSkips: 0,
+                  overEntries: 0, overOccurrences: 0, overDropped: 0, slack: 0 };
+  const matches = [];         // 已接受: {start, end, zhBuf}
+  const overCandidates = [];  // 超长条目暂存, 预算通过后才接受
+  let budget = 0;             // 安全条目省出来的字节
+
+  for (let k = 0; k < entries.length; k++) {
+    const it = entries[k];
+    const enBuf = Buffer.from(it.en, 'utf8');
+    const zhBuf = Buffer.from(it.zh, 'utf8');
+    if (zhBuf.includes(0)) continue;
+    const guardPrev = isIdByte(enBuf[0]);
+    const guardNext = isIdByte(enBuf[enBuf.length - 1]);
+    let from = 0, idx;
+    const found = [];
+    while ((idx = region.indexOf(enBuf, from)) !== -1) {
+      if ((guardPrev && idx > 0 && isIdByte(region[idx - 1])) ||
+          (guardNext && idx + enBuf.length < region.length && isIdByte(region[idx + enBuf.length]))) {
+        stats.boundarySkips++; from = idx + 1; continue;
+      }
+      if (inNativePool(region, idx, enBuf.length)) {
+        stats.poolSkips++; from = idx + enBuf.length; continue;
+      }
+      const seg = findSegment(segs, idx, idx + enBuf.length);
+      if (!seg) {
+        stats.codeSkips = (stats.codeSkips || 0) + 1; // 字符串字面量之外, 跳过
+        from = idx + enBuf.length; continue;
+      }
+      if (isComparisonString(region, seg)) {
+        stats.cmpSkips = (stats.cmpSkips || 0) + 1;   // 比较谓词字符串, 跳过
+        from = idx + enBuf.length; continue;
+      }
+      if (overlaps(idx, idx + enBuf.length)) { from = idx + enBuf.length; continue; }
+      claim(idx, idx + enBuf.length);
+      found.push(idx);
+      from = idx + enBuf.length;
+    }
+    if (!found.length) continue;
+    const delta = zhBuf.length - enBuf.length;
+    if (!it.over) {
+      budget += (-delta) * found.length;
+      stats.keysHit++; stats.occurrences += found.length;
+      for (const s of found) matches.push({ start: s, end: s + enBuf.length, zhBuf });
+    } else {
+      overCandidates.push({ zhBuf, enLen: enBuf.length, found, cost: delta * found.length });
+    }
+    if (onProgress && (k + 1) % 50 === 0) onProgress(k + 1, entries.length, stats.keysHit);
+  }
+
+  // 预算分配: 便宜的先进, 装不下的整条放弃(保证同一文案全译或全不译)
+  overCandidates.sort((a, b) => a.cost - b.cost);
+  for (const c of overCandidates) {
+    if (c.cost > budget) { stats.overDropped++; continue; }
+    budget -= c.cost;
+    stats.overEntries++; stats.overOccurrences += c.found.length;
+    stats.occurrences += c.found.length;
+    for (const s of c.found) matches.push({ start: s, end: s + c.enLen, zhBuf: c.zhBuf });
+  }
+  stats.slack = budget;
+
+  // 按位置拼接(被放弃的超长命中不在 matches 里, 自动保留英文原文)
+  matches.sort((a, b) => a.start - b.start);
+  const parts = [];
+  let cursor = 0;
+  for (const mt of matches) {
+    parts.push(region.subarray(cursor, mt.start), mt.zhBuf);
+    cursor = mt.end;
+  }
+  parts.push(region.subarray(cursor));
+  let out = Buffer.concat(parts);
+  if (out.length > region.length) {
+    throw new Error('内部错误: 预算核算与拼接结果不一致(' + out.length + ' > ' + region.length + '), 已中止。');
+  }
+  if (out.length < region.length) {
+    out = Buffer.concat([out, Buffer.alloc(region.length - out.length, 0x20)]);
+  }
+  return { buf: out, stats };
+}
+
+function loadOversize() {
+  const p = path.join(ROOT, 'dict', 'oversize.json');
+  try { return JSON.parse(fs.readFileSync(p, 'utf8')); } catch { return {}; }
 }
 
 // 同目录写临时文件再 rename(同盘保证原子性); rename 覆盖会让 target 指向新
@@ -699,7 +966,15 @@ function patchLocked(target, opts, healed, tmpRef) {
   }
   // 3) 只在主模块的 JS 源码区内做等长替换, 绝不碰字节码区与原生数据区。
   const region = buf.subarray(mainMod.sourceStart, mainMod.sourceEnd);
-  const stats = patchBuffer(region, dict, opts.onProgress);
+  let stats;
+  if (opts.full) {
+    // 实验特性 --full: 全局长度预算重写, 可容纳超长译文(详见 rewriteRegion 注释)
+    const rw = rewriteRegion(region, dict, loadOversize(), opts.onProgress);
+    rw.buf.copy(region); // 等长, 原位覆盖
+    stats = rw.stats;
+  } else {
+    stats = patchBuffer(region, dict, opts.onProgress, { segs: stringSegments(region) });
+  }
   stats.bytecodeDisabled = mainMod.bytecodeLength > 0;
   stats.sourceBytes = mainMod.sourceEnd - mainMod.sourceStart;
 
@@ -772,6 +1047,12 @@ function patchLocked(target, opts, healed, tmpRef) {
     occurrences: stats.occurrences,
     boundarySkips: stats.boundarySkips,
     poolSkips: stats.poolSkips,
+    codeSkips: stats.codeSkips || 0,
+    cmpSkips: stats.cmpSkips || 0,
+    overEntries: stats.overEntries,
+    overOccurrences: stats.overOccurrences,
+    overDropped: stats.overDropped,
+    slack: stats.slack,
     dictTotal: Object.keys(dict).length,
     backupRefreshed: refreshed,
     seconds: (Date.now() - t0) / 1000,
@@ -822,7 +1103,8 @@ function status(target) {
 
 module.exports = {
   loadDict, looksTranslated, countCjkRuns, resolveSource,
-  patchBuffer, atomicWrite, patch, restore, status, resignIfDarwin,
+  patchBuffer, rewriteRegion, loadOversize, stringSegments, insideString,
+  atomicWrite, patch, restore, status, resignIfDarwin,
   verifyRuntime, cleanAside, cleanTmp, backupIntact, inNativePool,
   acquireLock, releaseLock, pidAlive, withTargetLock,
   BACKUP_SUFFIX, DICT_PATH,

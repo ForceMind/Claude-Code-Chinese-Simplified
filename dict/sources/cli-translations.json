@@ -7834,10 +7834,6 @@
     "zh": "反馈草稿"
   },
   {
-    "en": "This session",
-    "zh": "本次会话"
-  },
-  {
     "en": "Other sessions",
     "zh": "其他会话"
   },
@@ -7999,7 +7995,7 @@
   },
   {
     "en": "Dial the model",
-    "zh": "调配模型"
+    "zh": "调校模型"
   },
   {
     "en": "Data privacy",
@@ -8023,7 +8019,7 @@
   },
   {
     "en": "Remove server?",
-    "zh": "删除 server?"
+    "zh": "移除 server?"
   },
   {
     "en": "Trust this directory?",
@@ -8047,7 +8043,7 @@
   },
   {
     "en": "Claude daemon",
-    "zh": "Claude 守护"
+    "zh": "守护进程"
   },
   {
     "en": "Set up auto mode for your environment?",
@@ -8130,10 +8126,6 @@
     "zh": "Hook 配置 · 已禁用"
   },
   {
-    "en": "memory index",
-    "zh": "记忆索引"
-  },
-  {
     "en": "Claude-drafted feedback",
     "zh": "Claude 起草的反馈"
   },
@@ -8200,10 +8192,6 @@
   {
     "en": "Gemini user-scope config",
     "zh": "Gemini 用户级配置"
-  },
-  {
-    "en": "scheduled task",
-    "zh": "定时任务"
   },
   {
     "en": "/rc failed",
@@ -8354,10 +8342,6 @@
     "zh": "网关 URL"
   },
   {
-    "en": "tmux session",
-    "zh": "tmux 会话"
-  },
-  {
     "en": "Auto (match terminal)",
     "zh": "自动(跟随终端)"
   },
@@ -8383,7 +8367,7 @@
   },
   {
     "en": "Keep worktree, end tmux session",
-    "zh": "保留 worktree 并退出 tmux"
+    "zh": "保留 worktree 并结束 tmux"
   },
   {
     "en": "Continue with usage credits",
@@ -8448,10 +8432,6 @@
   {
     "en": "Cloud agents",
     "zh": "云端 Agent"
-  },
-  {
-    "en": "Set it up",
-    "zh": "去设置"
   },
   {
     "en": "Don't show again",
